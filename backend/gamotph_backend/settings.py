@@ -12,15 +12,19 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 
 from pathlib import Path
 from decouple import config
+import os
 
 SUPABASE_API_URL = config('SUPABASE_API_URL')
 SUPABASE_SERVICE_ROLE_KEY = config('SUPABASE_SERVICE_ROLE_KEY')
 SUPABASE_PROJECT_ID = config('SUPABASE_PROJECT_ID')
 SUPABASE_ANON_KEY = config("SUPABASE_ANON_KEY")
 
+STATIC_URL = '/static/'
+
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
 
 # Quick-start development settings - unsuitable for production
@@ -30,7 +34,7 @@ SECRET_KEY = config('SECRET_KEY')
 DEBUG = config('DEBUG', default=True, cast=bool)
 
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['.onrender.com']
 
 
 # Application definition
@@ -47,6 +51,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -125,7 +130,8 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
-STATIC_URL = 'static/'
+STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
