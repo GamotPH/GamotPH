@@ -1,3 +1,6 @@
+# gamotph_backend/settings.py
+
+
 """
 Django settings for gamotph_backend project.
 
@@ -13,6 +16,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 from pathlib import Path
 from decouple import config
 import os
+from corsheaders.defaults import default_headers
 
 SUPABASE_API_URL = config('SUPABASE_API_URL')
 SUPABASE_SERVICE_ROLE_KEY = config('SUPABASE_SERVICE_ROLE_KEY')
@@ -34,12 +38,13 @@ SECRET_KEY = config('SECRET_KEY')
 DEBUG = config('DEBUG', default=True, cast=bool)
 
 
-ALLOWED_HOSTS = ['.onrender.com']
+ALLOWED_HOSTS = ['127.0.0.1', 'localhost', '.onrender.com']
 
 
 # Application definition
 
 INSTALLED_APPS = [
+    'corsheaders',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -51,6 +56,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -143,3 +149,8 @@ REST_FRAMEWORK = {
         'gamotph_backend.authentication.SupabaseJWTAuthentication',
     ),
 }
+
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:5173",  # React dev server
+    "https://gamotph-frontend.onrender.com",  # (if deployed frontend)
+]

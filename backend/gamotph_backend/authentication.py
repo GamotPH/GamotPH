@@ -1,3 +1,5 @@
+# gamotph_backend/authentication.py
+
 import jwt
 from rest_framework.authentication import BaseAuthentication
 from rest_framework import exceptions

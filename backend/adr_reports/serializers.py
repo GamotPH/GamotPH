@@ -11,6 +11,7 @@ class ADRReportSerializer(serializers.Serializer):
     geoLocation = serializers.CharField(trim_whitespace=True)
     aiAssistance = serializers.BooleanField()
     aiAssistanceResponse = serializers.CharField(required=False, allow_blank=True)
+    patientWeight = serializers.FloatField(min_value=0, max_value=500)
     casePriorityScore = serializers.FloatField(min_value=0.0, max_value=10.0)
 
     def validate_drugName(self, value):
