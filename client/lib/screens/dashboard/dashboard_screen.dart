@@ -1,7 +1,7 @@
 // client/lib/screens/dashboard/dashboard_screen.dart
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../reports/report_form_screen.dart';
+import '../home/report_form_screen.dart';
 
 class DashboardScreen extends StatelessWidget {
   const DashboardScreen({super.key});

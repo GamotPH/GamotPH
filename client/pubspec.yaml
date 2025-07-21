@@ -30,7 +30,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  supabase_flutter: ^1.10.6
+  supabase_flutter: ^1.10.18 
   url_launcher: ^6.1.10
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
@@ -64,6 +64,7 @@ flutter:
     - assets/dost_logo.png
     - assets/bagong_pilipinas_logo.png
     - assets/national_university_logo.png
+    - assets/GAMOTPH-LOGO.png
 
 
   # An image asset can refer to one or more resolution-specific "variants", see
