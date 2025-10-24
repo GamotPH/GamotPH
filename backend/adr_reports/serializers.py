@@ -3,12 +3,15 @@
 from rest_framework import serializers
 
 class ADRReportSerializer(serializers.Serializer):
+    reported_for = serializers.ChoiceField(choices=["myself", "someone_else"])
     patientAge = serializers.IntegerField(min_value=0, max_value=120)
     patientGender = serializers.ChoiceField(choices=["Male", "Female", "Other"])
     drugName = serializers.CharField(max_length=255, trim_whitespace=True)
     reactionDescription = serializers.CharField(trim_whitespace=True)
     severity = serializers.ChoiceField(choices=["mild", "moderate", "severe"])
     geoLocation = serializers.CharField(trim_whitespace=True)
+    latitude = serializers.FloatField(required=False)
+    longitude = serializers.FloatField(required=False)
     aiAssistance = serializers.BooleanField()
     aiAssistanceResponse = serializers.CharField(required=False, allow_blank=True)
     patientWeight = serializers.FloatField(min_value=0, max_value=500)

@@ -1,6 +1,10 @@
+// lib/screens/auth/register_screen.dart
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+// Alias Supabase so we can use supabase.Provider without clashing with Riverpod
+import 'package:supabase_flutter/supabase_flutter.dart' as supabase;
+// For LaunchMode.externalApplication on mobile OAuth
+import 'package:url_launcher/url_launcher.dart' show LaunchMode;
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -19,15 +23,16 @@ class _RegisterScreenState extends State<RegisterScreen> {
   Future<void> register() async {
     if (!_formKey.currentState!.validate()) return;
 
-    final supabase = Supabase.instance.client;
+    final client = supabase.Supabase.instance.client;
     final emailText = email.text.trim();
     final passwordText = password.text.trim();
 
     setState(() => _isLoading = true);
     try {
-      final res = await supabase.auth.signUp(
+      final res = await client.auth.signUp(
         email: emailText,
         password: passwordText,
+        // Adjust this to your deployed callback if needed
         emailRedirectTo: 'http://localhost:50565/email-confirmed',
       );
 
@@ -37,12 +42,16 @@ class _RegisterScreenState extends State<RegisterScreen> {
             content: Text('✅ Check your email to confirm your account.'),
           ),
         );
-        Navigator.pop(context);
+        if (mounted) Navigator.pop(context);
       } else {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('❌ Signup failed')));
       }
+    } on supabase.AuthException catch (e) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('❌ Error: ${e.message}')));
     } catch (e) {
       ScaffoldMessenger.of(
         context,
@@ -52,9 +61,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
     }
   }
 
-  Future<void> _signUpWithOAuth(Provider provider) async {
+  // Use the Supabase OAuth provider enum through the alias
+  Future<void> _signUpWithOAuth(supabase.OAuthProvider provider) async {
     try {
-      await Supabase.instance.client.auth.signInWithOAuth(
+      await supabase.Supabase.instance.client.auth.signInWithOAuth(
         provider,
         redirectTo: 'http://localhost:54321/auth/callback',
         authScreenLaunchMode: LaunchMode.externalApplication,
@@ -97,11 +107,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
               key: _formKey,
               child: Column(
                 children: [
-                  // Logo
+                  // Logo (ensure this matches the filename in pubspec)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 16),
                     child: Image.asset(
-                      'assets/GAMOTPH-Logo.png',
+                      'assets/GAMOTPH-LOGO.png',
                       height: 80,
                       fit: BoxFit.contain,
                     ),
@@ -113,7 +123,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   ),
                   const SizedBox(height: 32),
 
-                  // Email Field
+                  // Email
                   TextFormField(
                     controller: email,
                     decoration: const InputDecoration(
@@ -126,7 +136,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   ),
                   const SizedBox(height: 16),
 
-                  // Password Field
+                  // Password
                   TextFormField(
                     controller: password,
                     decoration: const InputDecoration(
@@ -139,7 +149,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   ),
                   const SizedBox(height: 16),
 
-                  // Confirm Password Field
+                  // Confirm Password
                   TextFormField(
                     controller: confirmPassword,
                     decoration: const InputDecoration(
@@ -191,12 +201,17 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     children: [
                       IconButton(
                         icon: const FaIcon(FontAwesomeIcons.google),
-                        onPressed: () => _signUpWithOAuth(Provider.google),
+                        onPressed:
+                            () =>
+                                _signUpWithOAuth(supabase.OAuthProvider.google),
                       ),
                       const SizedBox(width: 16),
                       IconButton(
                         icon: const FaIcon(FontAwesomeIcons.facebook),
-                        onPressed: () => _signUpWithOAuth(Provider.facebook),
+                        onPressed:
+                            () => _signUpWithOAuth(
+                              supabase.OAuthProvider.facebook,
+                            ),
                       ),
                     ],
                   ),
@@ -208,9 +223,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     children: [
                       const Text("Already have an account?"),
                       TextButton(
-                        onPressed: () {
-                          Navigator.pop(context);
-                        },
+                        onPressed: () => Navigator.pop(context),
                         child: const Text('Login'),
                       ),
                     ],

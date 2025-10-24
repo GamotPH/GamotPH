@@ -3,8 +3,9 @@ import 'package:client/screens/home/health_community_page.dart';
 import 'package:client/screens/home/hotlines_page.dart';
 import 'package:client/screens/home/statistics_page.dart';
 import 'package:client/screens/notifications/notifications_page.dart';
+import 'package:client/screens/reports/reports_dashboard_page.dart';
+import 'package:client/screens/trends/trends_map_page.dart';
 import 'package:flutter/material.dart';
-import '../screens/home/home_page.dart';
 import '../screens/home/report_form_screen.dart';
 import '../screens/home/scan_page.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -23,6 +24,7 @@ enum NavItem {
   healthCommunity,
   emergency,
   hotlines,
+  trends,
 }
 
 class HomeLayout extends StatefulWidget {
@@ -51,7 +53,7 @@ class HomeLayoutState extends State<HomeLayout> {
   String getPageTitle(NavItem item) {
     switch (item) {
       case NavItem.home:
-        return 'Home';
+        return 'Reports';
       case NavItem.report:
         return 'Report a Medicine';
       case NavItem.scan:
@@ -70,16 +72,27 @@ class HomeLayoutState extends State<HomeLayout> {
         return 'Emergency Response';
       case NavItem.hotlines:
         return 'Health Holines';
+      case NavItem.trends:
+        return 'Trends';
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    if (Supabase.instance.client.auth.currentSession == null) {
+      Future.microtask(() {
+        if (mounted) {
+          Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
+        }
+      });
+      return const SizedBox.shrink();
+    }
+
     Widget body;
 
     switch (selected) {
       case NavItem.home:
-        body = const HomePage();
+        body = const ReportsDashboardPage();
         break;
       case NavItem.report:
         body = const ReportFormScreen();
@@ -125,6 +138,9 @@ class HomeLayoutState extends State<HomeLayout> {
         break;
       case NavItem.hotlines:
         body = const HotlinesScreen();
+        break;
+      case NavItem.trends:
+        body = const TrendsMapPage();
         break;
     }
 
@@ -208,18 +224,7 @@ class HomeLayoutState extends State<HomeLayout> {
             child: ListView(
               padding: const EdgeInsets.symmetric(horizontal: 8),
               children: [
-                _navTileWithIcon(Icons.home, "Home", NavItem.home),
-                // _navTileWithIcon(
-                //   Icons.assignment,
-                //   "Report a Medicine",
-                //   NavItem.report,
-                // ),
-                // _navTileWithIcon(
-                //   Icons.qr_code_scanner,
-                //   "Scan Medicine",
-                //   NavItem.scan,
-                // ),
-                // _navTileWithIcon(Icons.bar_chart, "Statistics", NavItem.stats),
+                _navTileWithIcon(Icons.show_chart, "Reports", NavItem.home),
                 _navTileWithIcon(Icons.history, "History", NavItem.history),
                 _navTileWithIcon(
                   Icons.notifications,
@@ -286,11 +291,10 @@ class HomeLayoutState extends State<HomeLayout> {
                             onPressed: () async {
                               await Supabase.instance.client.auth.signOut();
                               if (!mounted) return;
-                              Navigator.pushReplacement(
+                              Navigator.pushNamedAndRemoveUntil(
                                 context,
-                                MaterialPageRoute(
-                                  builder: (_) => const HomeLayout(),
-                                ),
+                                '/',
+                                (route) => false,
                               );
                             },
                             icon: const Icon(Icons.logout, size: 18),
@@ -358,8 +362,8 @@ class HomeLayoutState extends State<HomeLayout> {
             child: ListView(
               padding: const EdgeInsets.symmetric(horizontal: 8),
               children: [
-                _navTileWithIcon(Icons.home, "Home", NavItem.home),
-                _navTileWithIcon(Icons.history, "History", NavItem.history),
+                _navTileWithIcon(Icons.show_chart, "Reports", NavItem.home),
+                _navTileWithIcon(Icons.history, "Maps", NavItem.trends),
                 _navTileWithIcon(
                   Icons.notifications,
                   "Notifications",
@@ -425,11 +429,10 @@ class HomeLayoutState extends State<HomeLayout> {
                             onPressed: () async {
                               await Supabase.instance.client.auth.signOut();
                               if (!mounted) return;
-                              Navigator.pushReplacement(
+                              Navigator.pushNamedAndRemoveUntil(
                                 context,
-                                MaterialPageRoute(
-                                  builder: (_) => const HomeLayout(),
-                                ),
+                                '/',
+                                (route) => false,
                               );
                             },
                             icon: const Icon(Icons.logout, size: 18),

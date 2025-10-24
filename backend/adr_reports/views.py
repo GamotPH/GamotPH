@@ -1,5 +1,3 @@
-# adr_reports/views.py
-
 import requests
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -8,6 +6,7 @@ from django.conf import settings
 from .serializers import ADRReportSerializer
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+from geopy.geocoders import Nominatim
 
 
 class ADRReportView(APIView):
@@ -26,6 +25,14 @@ class ADRReportView(APIView):
 
         # Inject authenticated user's Supabase UUID
         data["userID"] = user_data.get("sub")
+
+        # Auto-fetch latitude and longitude if not provided
+        if not data.get("latitude") or not data.get("longitude"):
+            address = data.get("geoLocation")
+            if address:
+                lat, lon = self.get_latlon_from_address(address)
+                data["latitude"] = lat
+                data["longitude"] = lon
 
         # Step 1: Deduplication check
         description = data.get("reactionDescription")
@@ -50,7 +57,7 @@ class ADRReportView(APIView):
             recent_texts = [r["reactionDescription"] for r in reports if "reactionDescription" in r]
 
         if recent_texts:
-            recent_texts.append(description)  # Append current one
+            recent_texts.append(description)
             tfidf = TfidfVectorizer().fit_transform(recent_texts)
             similarities = cosine_similarity(tfidf[-1:], tfidf[:-1])
             max_sim = max(similarities[0])
@@ -61,7 +68,7 @@ class ADRReportView(APIView):
                     "similarity_score": round(float(max_sim), 2)
                 }, status=409)
 
-        # Step 2: Prepare POST to Supabase
+        # Step 2: Submit to Supabase
         allowed_severity = ["mild", "moderate", "severe"]
         if data.get("severity") not in allowed_severity:
             return Response({"error": "Invalid severity value"}, status=400)
@@ -88,6 +95,17 @@ class ADRReportView(APIView):
                 "error": "Unexpected error when submitting ADR report",
                 "details": response.json()
             }, status=500)
+
+    def get_latlon_from_address(self, address):
+        try:
+            geolocator = Nominatim(user_agent="gamotph-api")
+            location = geolocator.geocode(address)
+            if location:
+                return location.latitude, location.longitude
+        except Exception:
+            pass
+        return -999, -999
+
 
 class MyADRReportsView(APIView):
     permission_classes = [IsAuthenticated]
