@@ -864,18 +864,36 @@ class AnalyticsRepository {
   }
 
   Future<LatLngBounds?> adminBounds(String code) async {
-    // Expects rpc_admin_bbox(code) -> {west,east,south,north}
     final res = await sb.rpc('rpc_admin_bbox', params: {'p_code': code});
-    if (res is Map<String, dynamic>) {
-      return _bboxFromJson(res);
+
+    Map<String, dynamic>? payload;
+
+    // Case 1: raw object  -> { west, east, south, north }
+    if (res is Map<String, dynamic> && res.containsKey('west')) {
+      payload = res;
     }
-    return null;
+    // Case 2: wrapped as { data: { ... } }
+    else if (res is Map<String, dynamic> &&
+        res['data'] is Map<String, dynamic>) {
+      final m = res['data'] as Map<String, dynamic>;
+      if (m.containsKey('west')) payload = m;
+    }
+    // Case 3: SETOF/array [ { ... } ]
+    else if (res is List &&
+        res.isNotEmpty &&
+        res.first is Map<String, dynamic>) {
+      final m = res.first as Map<String, dynamic>;
+      if (m.containsKey('west')) payload = m;
+    }
+
+    if (payload == null) return null;
+    return _bboxFromJson(payload);
   }
 
   /* ───────── Trends Map: clusters + top side effects ───────── */
 
   Future<TrendResult> fetchTrends({
-    required String region, // currently unused; left for future bbox join
+    required String region, // unused for now
     required DateTime start,
     required DateTime end,
     String? brandName,
@@ -883,28 +901,10 @@ class AnalyticsRepository {
     LatLngBounds? bbox,
     int hardLimit = 5000,
   }) async {
-    // 1) Pull ADR rows within window (only fields we need)
-    // Include common reaction columns so we can compute top side effects.
-    const reactionCols = [
-      'reactionDescription',
-      'reaction_pt',
-      'reaction',
-      'adr_category',
-      'adverse_reaction',
-      'adverseReaction',
-      'reactionTerm',
-      'reportedReaction',
-      'reaction_label',
-    ];
-
-    final selectCols =
-        '$_colCreatedAt, medicineId, '
-        'lat, latitude, geo_lat, lng, lon, longitude, geo_lng, '
-        '${reactionCols.join(', ')}';
-
+    // Only select columns that exist on your table
     final res = await sb
         .from(_tblReports)
-        .select(selectCols)
+        .select('$_colCreatedAt, medicineId, reactionDescription, latlng')
         .gte(_colCreatedAt, _iso(start))
         .lt(_colCreatedAt, _iso(end))
         .limit(hardLimit);
@@ -913,18 +913,18 @@ class AnalyticsRepository {
         (res is List)
             ? res.cast<Map<String, dynamic>>()
             : const <Map<String, dynamic>>[];
+
     if (rows.isEmpty) {
       return TrendResult(clusters: const [], topEffects: const []);
     }
 
-    // 2) Collect unique medicineIds from ADR_Reports
+    // Resolve medicineId → names (no `.in_()`)
     final medIds = <dynamic>{};
     for (final r in rows) {
       final id = r['medicineId'];
       if (id != null) medIds.add(id);
     }
 
-    // 3) Build lookup: medicineId -> {brandName, genericName}
     final medMap = <dynamic, Map<String, String>>{};
     if (medIds.isNotEmpty) {
       final ors = medIds.map((id) => 'id.eq.$id').join(',');
@@ -946,28 +946,9 @@ class AnalyticsRepository {
       }
     }
 
-    // helpers
-    double? _pickDouble(Map<String, dynamic> m, List<String> keys) {
-      for (final k in keys) {
-        final v = m[k];
-        if (v is num) return v.toDouble();
-        if (v is String) {
-          final d = double.tryParse(v);
-          if (d != null) return d;
-        }
-      }
-      return null;
-    }
-
-    String? _pickReaction(Map<String, dynamic> m) {
-      for (final k in reactionCols) {
-        final v = m[k];
-        if (v is String && v.trim().isNotEmpty) return v.trim();
-      }
-      return null;
-    }
-
+    // Helpers
     String _clean(String s) => s.trim().replaceAll(RegExp(r'\s+'), ' ');
+    String _canon(String s) => _clean(s).toLowerCase();
     bool _junk(String s) {
       final v = s.trim().toLowerCase();
       return v.isEmpty ||
@@ -975,26 +956,32 @@ class AnalyticsRepository {
           v == 'unspecified' ||
           v == 'unknown' ||
           v == 'n/a' ||
-          v == 'na';
+          v == 'na' ||
+          v == 'empty';
     }
 
-    const latKeys = ['lat', 'latitude', 'geo_lat', 'lat_deg'];
-    const lngKeys = ['lng', 'lon', 'longitude', 'geo_lng', 'long', 'lng_deg'];
+    // Parse "lat, lng" from text field
+    (double? lat, double? lng) _parseLatLng(dynamic v) {
+      if (v is! String) return (null, null);
+      final s = v.trim();
+      if (s.isEmpty || s.toLowerCase() == 'empty') return (null, null);
+      final m = RegExp(
+        r'(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)',
+      ).firstMatch(s);
+      if (m == null) return (null, null);
+      final lat = double.tryParse(m.group(1)!);
+      final lng = double.tryParse(m.group(2)!);
+      return (lat, lng);
+    }
 
-    // 4) Build points and side-effect tallies
+    // Build clusters + top effects
     final pts = <TrendPoint>[];
-    final counts = <String, int>{}; // key: "$drug|||$effect" → cases
-    final displayDrug = <String, String>{}; // canonical drug key → display
-    final displayEff = <String, String>{}; // canonical effect key → display
 
-    String _canon(String s) => _clean(s).toLowerCase();
+    final counts = <String, int>{}; // "$drugKey|||$effKey" -> cases
+    final displayDrug = <String, String>{}; // canonical -> display label
+    final displayEff = <String, String>{}; // canonical -> display label
 
     for (final r in rows) {
-      // coords (optional for clusters)
-      final lat = _pickDouble(r, latKeys);
-      final lng = _pickDouble(r, lngKeys);
-
-      // medicine names
       final names =
           medMap[r['medicineId']] ?? const {'brand': '', 'generic': ''};
       final brand = names['brand'] ?? '';
@@ -1003,25 +990,39 @@ class AnalyticsRepository {
           brand.isNotEmpty ? brand : (generic.isNotEmpty ? generic : 'Unknown');
       final drugKey = _canon(drugDisplay);
 
-      // reaction/effect
-      final picked = _pickReaction(r) ?? 'Unspecified';
-      final effDisplay = _junk(picked) ? 'Unspecified' : _clean(picked);
+      // filter by selected brand/generic BEFORE counting
+      if ((brandName ?? '').trim().isNotEmpty &&
+          !brand.toLowerCase().contains(brandName!.trim().toLowerCase())) {
+        continue;
+      }
+      if ((genericName ?? '').trim().isNotEmpty &&
+          !generic.toLowerCase().contains(genericName!.trim().toLowerCase())) {
+        continue;
+      }
+
+      // Parse coordinates from latlng
+      final (lat, lng) = _parseLatLng(r['latlng']);
+
+      // Filter by selected region/province/city bounds (use contains for safety)
+      if (bbox != null) {
+        if (lat == null || lng == null) continue;
+        final inside = bbox.contains(LatLng(lat, lng));
+        if (!inside) continue;
+      }
+
+      // Reaction description
+      final raw = (r['reactionDescription'] as String?) ?? 'Unspecified';
+      final effDisplay = _junk(raw) ? 'Unspecified' : _clean(raw);
       final effKey = _canon(effDisplay);
 
-      // Optional spatial clip
+      // Count side effects (already area-filtered)
+      final pairKey = '$drugKey|||$effKey';
+      displayDrug.putIfAbsent(drugKey, () => drugDisplay);
+      displayEff.putIfAbsent(effKey, () => effDisplay);
+      counts.update(pairKey, (v) => v + 1, ifAbsent: () => 1);
+
+      // For map clustering
       if (lat != null && lng != null) {
-        if (bbox != null) {
-          final inside =
-              lat >= bbox.south &&
-              lat <= bbox.north &&
-              lng >= bbox.west &&
-              lng <= bbox.east;
-          if (!inside) {
-            // still include in top effects even if outside? keep behavior simple:
-            // skip entirely when clipping by bbox.
-            continue;
-          }
-        }
         pts.add(
           TrendPoint(
             lat: lat,
@@ -1032,25 +1033,9 @@ class AnalyticsRepository {
           ),
         );
       }
-
-      // Filter by selected brand/generic (case-insensitive) BEFORE counting
-      if ((brandName ?? '').trim().isNotEmpty) {
-        final needle = brandName!.trim().toLowerCase();
-        if (!brand.toLowerCase().contains(needle)) continue;
-      }
-      if ((genericName ?? '').trim().isNotEmpty) {
-        final needle = genericName!.trim().toLowerCase();
-        if (!generic.toLowerCase().contains(needle)) continue;
-      }
-
-      // Tally (drug, effect)
-      final pairKey = '$drugKey|||$effKey';
-      displayDrug[drugKey] = drugDisplay;
-      displayEff[effKey] = effDisplay;
-      counts.update(pairKey, (v) => v + 1, ifAbsent: () => 1);
     }
 
-    // 5) Grid clustering (~5–6km) for the heat layer
+    // Grid clustering (~5–6km)
     final clusters = <TrendCluster>[];
     if (pts.isNotEmpty) {
       const bucketDeg = 0.05;
@@ -1075,11 +1060,10 @@ class AnalyticsRepository {
       });
     }
 
-    // 6) Top side effects
+    // Rank top effects (UI shows up to 7)
     final entries =
         counts.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
 
-    // return up to, say, 50; UI clamps to 7 anyway
     final topEffects = <SideEffectCount>[];
     for (final e in entries.take(50)) {
       final parts = e.key.split('|||');

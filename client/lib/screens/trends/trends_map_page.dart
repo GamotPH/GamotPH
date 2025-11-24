@@ -7,7 +7,7 @@ import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../../data/providers.dart';
-import '../../data/analytics_repository.dart' show TrendCluster, AdminArea;
+import '../../data/analytics_repository.dart' show TrendCluster;
 
 class TrendsMapPage extends ConsumerStatefulWidget {
   const TrendsMapPage({super.key});
@@ -20,51 +20,45 @@ class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
   String _selectedGeneric = 'ALL';
   String _selectedBrand = 'ALL';
 
-  // Linked area selections (null == ALL)
+  // Linked area selection (null == ALL) — REGION ONLY
   String? _regionCode;
-  String? _provinceCode;
-  String? _cityCode;
 
   DateTimeRange _range = DateTimeRange(
     start: DateTime(DateTime.now().year, 1, 1),
     end: DateTime(DateTime.now().year, 12, 31),
   );
 
-  // Map defaults
-  final LatLng _initialCenter = const LatLng(14.6760, 121.0437);
-  final double _initialZoom = 9.5;
+  // Map defaults — show the whole Philippines at first paint
+  final LatLng _initialCenter = const LatLng(12.8797, 121.7740);
+  final double _initialZoom = 6.0;
+
+  // Map controller + dynamic sizing
+  final MapController _mapController = MapController();
+  double _zoom = 9.5;
+  LatLngBounds? _selectedBounds; // active bbox of chosen area (null = ALL)
+  bool _mapReady = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Don't move the camera here; do it in onMapReady once the map has a real size.
+  }
 
   @override
   Widget build(BuildContext context) {
-    final dateLabel =
-        '${DateFormat('MM/dd/yy').format(_range.start)} - ${DateFormat('MM/dd/yy').format(_range.end)}';
-
-    // Lists for the three dropdowns
+    // Region dropdown options
     final regionsAsync = ref.watch(
       adminAreasProvider((level: AreaLevel.region, parentCode: null)),
     );
 
-    final provincesAsync = ref.watch(
-      adminAreasProvider((level: AreaLevel.province, parentCode: _regionCode)),
-    );
-
-    // Use the NEW provider that understands province OR region as parent.
-    // Cities depend on Province if chosen, otherwise Region; ALL => all cities.
-    // Cities/Municipalities: province takes priority; else region; else ALL
-    final citiesAsync = ref.watch(
-      adminAreasProvider((
-        level: AreaLevel.city,
-        parentCode: _provinceCode ?? _regionCode, // null => ALL cities
-      )),
-    );
-    // Most specific area wins
-    final String? areaCode = _cityCode ?? _provinceCode ?? _regionCode;
+    // Region-only area code
+    final String? areaCode = _regionCode;
 
     // Drug filters
     final genericsAsync = ref.watch(genericNameListProvider(_selectedBrand));
     final brandsAsync = ref.watch(brandNameListProvider(_selectedGeneric));
 
-    // Trends query
+    // Trends query (server already receives areaCode; we also guard on the client with bbox)
     final params = TrendsParams(
       areaCode: areaCode,
       start: _range.start.toUtc(),
@@ -97,22 +91,21 @@ class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
                           label: 'Region',
                           child: _Box(
                             child: regionsAsync.when(
-                              loading:
-                                  () => const Padding(
-                                    padding: EdgeInsets.symmetric(vertical: 12),
-                                    child: LinearProgressIndicator(
-                                      minHeight: 2,
-                                    ),
-                                  ),
-                              error:
-                                  (e, _) => Padding(
-                                    padding: const EdgeInsets.all(8.0),
-                                    child: Text(
-                                      'Failed to load regions:\n$e',
-                                      style: TextStyle(fontSize: 12),
-                                    ),
-                                  ),
+                              loading: () => const _LoadingStrip(),
+                              error: (e, _) => _Err('regions', e),
                               data: (regions) {
+                                // Ensure current selection exists
+                                _ensureSelectionExists(
+                                  itemsCodes: regions.map((e) => e.code),
+                                  current: _regionCode,
+                                  clear: () {
+                                    setState(() {
+                                      _regionCode = null;
+                                    });
+                                    _updateBoundsAndPan();
+                                  },
+                                );
+
                                 final items = <DropdownMenuItem<String?>>[
                                   const DropdownMenuItem<String?>(
                                     value: null,
@@ -135,119 +128,10 @@ class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
                                   onChanged: (code) {
                                     setState(() {
                                       _regionCode = code;
-                                      _provinceCode = null;
-                                      _cityCode = null;
+                                      _selectedBounds = null; // reset guard
                                     });
+                                    _updateBoundsAndPan();
                                   },
-                                  decoration: const InputDecoration(
-                                    border: InputBorder.none,
-                                  ),
-                                );
-                              },
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-
-                        // ---------------- Province ----------------
-                        _LabeledField(
-                          label: 'Province',
-                          child: _Box(
-                            child: provincesAsync.when(
-                              loading:
-                                  () => const Padding(
-                                    padding: EdgeInsets.symmetric(vertical: 12),
-                                    child: LinearProgressIndicator(
-                                      minHeight: 2,
-                                    ),
-                                  ),
-                              error:
-                                  (e, _) => Padding(
-                                    padding: const EdgeInsets.all(8.0),
-                                    child: Text(
-                                      'Failed to load provinces:\n$e',
-                                      style: TextStyle(fontSize: 12),
-                                    ),
-                                  ),
-                              data: (provinces) {
-                                final items = <DropdownMenuItem<String?>>[
-                                  const DropdownMenuItem<String?>(
-                                    value: null,
-                                    child: Text('ALL'),
-                                  ),
-                                  ...provinces.map(
-                                    (p) => DropdownMenuItem<String?>(
-                                      value: p.code,
-                                      child: Text(
-                                        p.name,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ),
-                                  ),
-                                ];
-                                return DropdownButtonFormField<String?>(
-                                  value: _provinceCode,
-                                  isExpanded: true,
-                                  items: items,
-                                  onChanged: (code) {
-                                    setState(() {
-                                      _provinceCode = code;
-                                      _cityCode = null;
-                                    });
-                                  },
-                                  decoration: const InputDecoration(
-                                    border: InputBorder.none,
-                                  ),
-                                );
-                              },
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-
-                        // ---------------- City/Municipality ----------------
-                        _LabeledField(
-                          label: 'City/Municipality',
-                          child: _Box(
-                            child: citiesAsync.when(
-                              loading:
-                                  () => const Padding(
-                                    padding: EdgeInsets.symmetric(vertical: 12),
-                                    child: LinearProgressIndicator(
-                                      minHeight: 2,
-                                    ),
-                                  ),
-                              error:
-                                  (e, _) => Padding(
-                                    padding: const EdgeInsets.all(8.0),
-                                    child: Text(
-                                      'Failed to load cities:\n$e',
-                                      style: TextStyle(fontSize: 12),
-                                    ),
-                                  ),
-                              data: (cities) {
-                                final items = <DropdownMenuItem<String?>>[
-                                  const DropdownMenuItem<String?>(
-                                    value: null,
-                                    child: Text('ALL'),
-                                  ),
-                                  ...cities.map(
-                                    (c) => DropdownMenuItem<String?>(
-                                      value: c.code,
-                                      child: Text(
-                                        c.name,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ),
-                                  ),
-                                ];
-                                return DropdownButtonFormField<String?>(
-                                  value: _cityCode,
-                                  isExpanded: true,
-                                  items: items,
-                                  onChanged:
-                                      (code) =>
-                                          setState(() => _cityCode = code),
                                   decoration: const InputDecoration(
                                     border: InputBorder.none,
                                   ),
@@ -272,8 +156,9 @@ class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
                                 ),
                                 initialDateRange: _range,
                               );
-                              if (picked != null)
+                              if (picked != null) {
                                 setState(() => _range = picked);
+                              }
                             },
                             child: _Box(
                               child: Row(
@@ -285,7 +170,8 @@ class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
                                   const SizedBox(width: 8),
                                   Expanded(
                                     child: Text(
-                                      '${DateFormat('MM/dd/yy').format(_range.start)} - ${DateFormat('MM/dd/yy').format(_range.end)}',
+                                      '${DateFormat('MM/dd/yy').format(_range.start)} - '
+                                      '${DateFormat('MM/dd/yy').format(_range.end)}',
                                     ),
                                   ),
                                   const Icon(Icons.edit_calendar, size: 18),
@@ -302,21 +188,8 @@ class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
                           label: 'Generic Name',
                           child: _Box(
                             child: genericsAsync.when(
-                              loading:
-                                  () => const Padding(
-                                    padding: EdgeInsets.symmetric(vertical: 12),
-                                    child: LinearProgressIndicator(
-                                      minHeight: 2,
-                                    ),
-                                  ),
-                              error:
-                                  (e, _) => Padding(
-                                    padding: const EdgeInsets.all(8),
-                                    child: Text(
-                                      'Failed to load generics:\n$e',
-                                      style: TextStyle(fontSize: 12),
-                                    ),
-                                  ),
+                              loading: () => const _LoadingStrip(),
+                              error: (e, _) => _Err('generics', e),
                               data: (list) {
                                 final options =
                                     <String>{...list, 'ALL'}.toList()
@@ -363,21 +236,8 @@ class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
                           label: 'Brand Name',
                           child: _Box(
                             child: brandsAsync.when(
-                              loading:
-                                  () => const Padding(
-                                    padding: EdgeInsets.symmetric(vertical: 12),
-                                    child: LinearProgressIndicator(
-                                      minHeight: 2,
-                                    ),
-                                  ),
-                              error:
-                                  (e, _) => Padding(
-                                    padding: const EdgeInsets.all(8),
-                                    child: Text(
-                                      'Failed to load brands:\n$e',
-                                      style: TextStyle(fontSize: 12),
-                                    ),
-                                  ),
+                              loading: () => const _LoadingStrip(),
+                              error: (e, _) => _Err('brands', e),
                               data: (list) {
                                 final options =
                                     <String>{...list, 'ALL'}.toList()
@@ -421,7 +281,7 @@ class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
                         Text('Top Side Effects', style: _Styles.sectionTitle),
                         const SizedBox(height: 8),
 
-                        // --------- Effects list (non-scrollable inside the ListView) ---------
+                        // --------- Effects list ---------
                         ClipRRect(
                           borderRadius: BorderRadius.circular(16),
                           child: Material(
@@ -452,24 +312,26 @@ class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
                                     ),
                                   );
                                 }
-                                return ListView.separated(
-                                  padding: const EdgeInsets.all(12),
-                                  shrinkWrap: true,
-                                  physics: const NeverScrollableScrollPhysics(),
-                                  itemCount: list.length.clamp(0, 7),
-                                  separatorBuilder:
-                                      (_, __) => const SizedBox(height: 10),
-                                  itemBuilder: (context, i) {
-                                    final t = list[i];
-                                    return _EffectTile(
-                                      drug: t.drug.isEmpty ? 'Unknown' : t.drug,
-                                      effect:
-                                          t.effect.isEmpty
-                                              ? 'Unspecified'
-                                              : t.effect,
-                                      cases: t.cases,
-                                    );
-                                  },
+                                return SizedBox(
+                                  height: 320,
+                                  child: ListView.separated(
+                                    padding: const EdgeInsets.all(12),
+                                    itemCount: list.length,
+                                    separatorBuilder:
+                                        (_, __) => const SizedBox(height: 10),
+                                    itemBuilder: (context, i) {
+                                      final t = list[i];
+                                      return _EffectTile(
+                                        drug:
+                                            t.drug.isEmpty ? 'Unknown' : t.drug,
+                                        effect:
+                                            t.effect.isEmpty
+                                                ? 'Unspecified'
+                                                : t.effect,
+                                        cases: t.cases,
+                                      );
+                                    },
+                                  ),
                                 );
                               },
                             ),
@@ -522,9 +384,18 @@ class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(4),
                         child: FlutterMap(
+                          mapController: _mapController,
                           options: MapOptions(
                             initialCenter: _initialCenter,
                             initialZoom: _initialZoom,
+                            onMapReady: () {
+                              _mapReady = true;
+                              _updateBoundsAndPan(); // align camera to ALL or region bbox
+                            },
+                            onMapEvent: (evt) {
+                              final z = evt.camera.zoom;
+                              if (z != _zoom) setState(() => _zoom = z);
+                            },
                           ),
                           children: [
                             TileLayer(
@@ -532,11 +403,26 @@ class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
                                   'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                               userAgentPackageName: 'com.gamotph.app',
                             ),
+
+                            // NOTE: We intentionally DO NOT draw the blue bbox rectangle anymore.
+
+                            // Heat circles (strictly inside bbox when a specific area is chosen)
                             trendsAsync.maybeWhen(
-                              data:
-                                  (res) => CircleLayer(
-                                    circles: _buildHeatCircles(res.clusters),
+                              data: (res) {
+                                final bool showingAll = _regionCode == null;
+                                // If a specific area is selected but we don't have its bbox yet,
+                                // hide the circles to avoid leaking markers from the previous area.
+                                if (!showingAll && _selectedBounds == null) {
+                                  return const SizedBox.shrink();
+                                }
+                                return CircleLayer(
+                                  circles: _buildHeatCirclesFiltered(
+                                    res.clusters,
+                                    bounds: _selectedBounds,
+                                    zoom: _zoom,
                                   ),
+                                );
+                              },
                               orElse: () => const SizedBox.shrink(),
                             ),
                           ],
@@ -581,8 +467,58 @@ class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
     );
   }
 
+  // ---------------------- bounds + camera helpers ----------------------
+  Future<void> _updateBoundsAndPan() async {
+    if (!_mapReady) return; // avoid moving before map layout is ready
+
+    final String? code = _regionCode;
+
+    // If ALL is selected, clear bounds and zoom out to whole PH
+    if (code == null) {
+      setState(() => _selectedBounds = null);
+
+      // Move after current frame to be extra safe
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _mapController.move(const LatLng(12.8797, 121.7740), 6.0);
+      });
+      return;
+    }
+
+    // Fetch bbox for the selected code
+    final bbox = await ref.read(repoProvider).adminBounds(code);
+
+    if (!mounted) return;
+
+    if (bbox == null) {
+      // Important: clear bounds when the lookup fails so we don't reuse an old bbox.
+      setState(() => _selectedBounds = null);
+      return;
+    }
+
+    setState(() => _selectedBounds = bbox);
+
+    // Fit camera to bbox
+    _mapController.fitCamera(
+      CameraFit.bounds(
+        bounds: bbox,
+        padding: const EdgeInsets.only(
+          left: 12,
+          right: 12,
+          top: 12,
+          bottom: 12,
+        ),
+      ),
+    );
+  }
+
   // --------------------------- heat helpers ---------------------------
-  List<CircleMarker> _buildHeatCircles(List<TrendCluster> clusters) {
+  // Keep circles visible at any zoom (pixel radius), and clamp to selected bounds.
+  List<CircleMarker> _buildHeatCirclesFiltered(
+    List<TrendCluster> clusters, {
+    LatLngBounds? bounds,
+    required double zoom,
+  }) {
     if (clusters.isEmpty) return const <CircleMarker>[];
 
     int minC = clusters.first.count;
@@ -595,23 +531,39 @@ class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
 
     final items = <CircleMarker>[];
     for (final c in clusters) {
+      if (bounds != null && !_insideBounds(bounds, c.center)) continue;
+
       final t = (c.count - minC) / denom;
       final color = _heatColor(t);
-      final radiusMeters =
-          (600 + 220 * math.sqrt(c.count)).clamp(400, 2500).toDouble();
+      final px = _radiusForZoom(zoom, c.count); // pixel radius
 
       items.add(
         CircleMarker(
           point: c.center,
-          useRadiusInMeter: true,
-          radius: radiusMeters,
-          color: color.withValues(alpha: 0.18),
-          borderColor: color.withValues(alpha: 0.35),
-          borderStrokeWidth: 1.2,
+          useRadiusInMeter: false, // pixel-based so it scales with zoom
+          radius: px,
+          color: color.withValues(alpha: 0.55),
+          borderColor: color.withValues(alpha: 0.75),
+          borderStrokeWidth: 1.8,
         ),
       );
     }
     return items;
+  }
+
+  bool _insideBounds(LatLngBounds b, LatLng p) {
+    return p.latitude >= b.south &&
+        p.latitude <= b.north &&
+        p.longitude >= b.west &&
+        p.longitude <= b.east;
+  }
+
+  // zoom -> pixel radius (smooth growth between z=6..14)
+  double _radiusForZoom(double zoom, int count) {
+    final t = ((zoom - 6.0) / 8.0).clamp(0.0, 1.0); // 6..14 -> 0..1
+    final base = 8.0 + (24.0 * t); // 8..32 px
+    final bonus = (math.log(count + 1) / math.ln10) * 2.0; // small emphasis
+    return base + bonus;
   }
 
   static Color _heatColor(double t) {
@@ -654,6 +606,22 @@ class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
           ),
         ),
       );
+    }
+  }
+
+  // ---- selection validity helper ----
+  void _ensureSelectionExists({
+    required Iterable<String> itemsCodes,
+    required String? current,
+    required VoidCallback clear,
+  }) {
+    if (current == null) return;
+    final exists = itemsCodes.any((c) => c == current);
+    if (!exists) {
+      // Clear *after* this frame to avoid setState during build.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) clear();
+      });
     }
   }
 }
@@ -712,60 +680,107 @@ class _Box extends StatelessWidget {
 }
 
 class _EffectTile extends StatelessWidget {
+  final String drug;
+  final String effect;
+  final int cases;
+
   const _EffectTile({
     required this.drug,
     required this.effect,
     required this.cases,
   });
-  final String drug;
-  final String effect;
-  final int cases;
+
   @override
-  Widget build(BuildContext context) => Container(
-    height: 70,
-    decoration: BoxDecoration(
-      color: const Color(0xFFF7F6FB),
-      borderRadius: BorderRadius.circular(14),
-      border: Border.all(color: const Color(0xFFE6E3EE)),
-    ),
-    child: Row(
-      children: [
-        const SizedBox(width: 10),
-        Container(
-          width: 42,
-          height: 42,
-          decoration: BoxDecoration(
-            color: const Color(0xFF233BCE),
-            borderRadius: BorderRadius.circular(10),
+  Widget build(BuildContext context) {
+    return Container(
+      height: 64,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: const [
+          BoxShadow(color: Colors.black12, blurRadius: 3, offset: Offset(0, 1)),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: Colors.blue.shade100,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Icon(Icons.medical_services, color: Colors.blue),
           ),
-          child: const Icon(Icons.event_note, color: Colors.white),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  drug,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 15,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                Text(
+                  effect,
+                  style: const TextStyle(color: Colors.black54, fontSize: 13),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          Column(
             mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              Text(drug, style: const TextStyle(fontWeight: FontWeight.w800)),
-              Text(effect, style: const TextStyle(color: Colors.black54)),
+              const Text(
+                'No. of Cases',
+                style: TextStyle(color: Colors.black45, fontSize: 11),
+              ),
+              Text(
+                cases.toString(),
+                style: const TextStyle(
+                  fontWeight: FontWeight.w700,
+                  color: Colors.black87,
+                  fontSize: 14,
+                ),
+              ),
             ],
           ),
-        ),
-        Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Text(
-              'No. of Cases',
-              style: TextStyle(fontSize: 12, color: Colors.black54),
-            ),
-            Text(
-              '$cases',
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
-            ),
-          ],
-        ),
-        const SizedBox(width: 14),
-      ],
+        ],
+      ),
+    );
+  }
+}
+
+class _LoadingStrip extends StatelessWidget {
+  const _LoadingStrip();
+  @override
+  Widget build(BuildContext context) => const Padding(
+    padding: EdgeInsets.symmetric(vertical: 12),
+    child: LinearProgressIndicator(minHeight: 2),
+  );
+}
+
+class _Err extends StatelessWidget {
+  final String what;
+  final Object error;
+  const _Err(this.what, this.error);
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.all(8.0),
+    child: Text(
+      'Failed to load $what:\n$error',
+      style: const TextStyle(fontSize: 12),
     ),
   );
 }

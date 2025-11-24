@@ -385,20 +385,48 @@ class TrendsParams {
 final trendsProvider = FutureProvider.autoDispose
     .family<TrendResult, TrendsParams>((ref, p) async {
       final repo = ref.read(repoProvider);
+
+      // Reuse the shared bounds provider (it already calls repo.adminBounds
+      // and has an NCR fallback). This also keeps things reactive.
+      final bbox =
+          (p.areaCode == null)
+              ? null
+              : await ref.read(selectedAdminBoundsProvider.future);
+
       return repo.fetchTrends(
         region: p.areaCode ?? 'ALL',
         start: p.start,
         end: p.end,
         brandName: p.brandName,
         genericName: p.genericName,
-        bbox: null,
+        bbox: bbox,
       );
     });
 
 /* ------------------------------ Realtime invalidation --------------------- */
 
+// lib/data/providers.dart
+
 final metricsRealtimeProvider = Provider<void>((ref) {
   final client = supa.Supabase.instance.client;
+
+  var isDisposed = false;
+  ref.onDispose(() => isDisposed = true);
+
+  void deferInvalidateAll() {
+    // Run after the current build; bail out if provider got disposed.
+    // wherever you do realtime -> invalidate:
+    Future.microtask(() {
+      ref.invalidate(keyMetricsProvider);
+      ref.invalidate(symptomsProvider);
+      ref.invalidate(wordCloudProvider);
+      ref.invalidate(geoDistributionProvider);
+      ref.invalidate(topMedicineProvider);
+      ref.invalidate(clinicalManagementProvider);
+      ref.invalidate(adverseReactionsProvider);
+      ref.invalidate(trendsProvider);
+    });
+  }
 
   final channel =
       client
@@ -407,46 +435,19 @@ final metricsRealtimeProvider = Provider<void>((ref) {
             event: supa.PostgresChangeEvent.insert,
             schema: 'public',
             table: 'adr_reports',
-            callback: (_) {
-              ref.invalidate(keyMetricsProvider);
-              ref.invalidate(symptomsProvider);
-              ref.invalidate(wordCloudProvider);
-              ref.invalidate(geoDistributionProvider);
-              ref.invalidate(topMedicineProvider);
-              ref.invalidate(clinicalManagementProvider);
-              ref.invalidate(adverseReactionsProvider);
-              ref.invalidate(trendsProvider); // entire family
-            },
+            callback: (_) => deferInvalidateAll(),
           )
           .onPostgresChanges(
             event: supa.PostgresChangeEvent.update,
             schema: 'public',
             table: 'adr_reports',
-            callback: (_) {
-              ref.invalidate(keyMetricsProvider);
-              ref.invalidate(symptomsProvider);
-              ref.invalidate(wordCloudProvider);
-              ref.invalidate(geoDistributionProvider);
-              ref.invalidate(topMedicineProvider);
-              ref.invalidate(clinicalManagementProvider);
-              ref.invalidate(adverseReactionsProvider);
-              ref.invalidate(trendsProvider);
-            },
+            callback: (_) => deferInvalidateAll(),
           )
           .onPostgresChanges(
             event: supa.PostgresChangeEvent.delete,
             schema: 'public',
             table: 'adr_reports',
-            callback: (_) {
-              ref.invalidate(keyMetricsProvider);
-              ref.invalidate(symptomsProvider);
-              ref.invalidate(wordCloudProvider);
-              ref.invalidate(geoDistributionProvider);
-              ref.invalidate(topMedicineProvider);
-              ref.invalidate(clinicalManagementProvider);
-              ref.invalidate(adverseReactionsProvider);
-              ref.invalidate(trendsProvider);
-            },
+            callback: (_) => deferInvalidateAll(),
           )
           .subscribe();
 
