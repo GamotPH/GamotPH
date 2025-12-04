@@ -1,9 +1,7 @@
 // lib/screens/auth/register_screen.dart
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
-// Alias Supabase so we can use supabase.Provider without clashing with Riverpod
 import 'package:supabase_flutter/supabase_flutter.dart' as supabase;
-// For LaunchMode.externalApplication on mobile OAuth
 import 'package:url_launcher/url_launcher.dart' show LaunchMode;
 
 class RegisterScreen extends StatefulWidget {
@@ -18,7 +16,18 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final email = TextEditingController();
   final password = TextEditingController();
   final confirmPassword = TextEditingController();
+  final organization = TextEditingController();
+
   bool _isLoading = false;
+
+  @override
+  void dispose() {
+    email.dispose();
+    password.dispose();
+    confirmPassword.dispose();
+    organization.dispose();
+    super.dispose();
+  }
 
   Future<void> register() async {
     if (!_formKey.currentState!.validate()) return;
@@ -26,42 +35,54 @@ class _RegisterScreenState extends State<RegisterScreen> {
     final client = supabase.Supabase.instance.client;
     final emailText = email.text.trim();
     final passwordText = password.text.trim();
+    final orgText = organization.text.trim();
 
     setState(() => _isLoading = true);
+
     try {
       final res = await client.auth.signUp(
         email: emailText,
         password: passwordText,
-        // Adjust this to your deployed callback if needed
-        emailRedirectTo: 'http://localhost:50565/email-confirmed',
+        data: {
+          'requested_org': orgText, // ⭐ sent to metadata → trigger uses this
+        },
+        emailRedirectTo:
+            'http://localhost:50565/email-confirmed', // your callback
       );
 
       if (res.user != null) {
+        if (!mounted) return;
+
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('✅ Check your email to confirm your account.'),
           ),
         );
-        if (mounted) Navigator.pop(context);
+
+        Navigator.pop(context);
       } else {
+        if (!mounted) return;
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('❌ Signup failed')));
       }
     } on supabase.AuthException catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('❌ Error: ${e.message}')));
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('❌ Error: $e')));
     } finally {
-      setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
-  // Use the Supabase OAuth provider enum through the alias
   Future<void> _signUpWithOAuth(supabase.OAuthProvider provider) async {
     try {
       await supabase.Supabase.instance.client.auth.signInWithOAuth(
@@ -70,6 +91,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         authScreenLaunchMode: LaunchMode.externalApplication,
       );
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('OAuth signup failed: $e')));
@@ -94,6 +116,16 @@ class _RegisterScreenState extends State<RegisterScreen> {
     return null;
   }
 
+  String? _validateOrganization(String? value) {
+    if (value == null || value.trim().isEmpty) {
+      return 'Organization is required';
+    }
+    if (value.trim().length < 3) {
+      return 'Please enter a valid organization name';
+    }
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -107,7 +139,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
               key: _formKey,
               child: Column(
                 children: [
-                  // Logo (ensure this matches the filename in pubspec)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 16),
                     child: Image.asset(
@@ -131,7 +162,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       prefixIcon: Icon(Icons.email),
                       border: OutlineInputBorder(),
                     ),
-                    keyboardType: TextInputType.emailAddress,
                     validator: _validateEmail,
                   ),
                   const SizedBox(height: 16),
@@ -160,9 +190,22 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     obscureText: true,
                     validator: _validateConfirmPassword,
                   ),
+                  const SizedBox(height: 16),
+
+                  // Organization
+                  TextFormField(
+                    controller: organization,
+                    decoration: const InputDecoration(
+                      labelText: "Organization (Pharma / FDA / etc.)",
+                      prefixIcon: Icon(Icons.business),
+                      border: OutlineInputBorder(),
+                    ),
+                    validator: _validateOrganization,
+                  ),
+
                   const SizedBox(height: 28),
 
-                  // Register Button
+                  // Register button
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
@@ -186,16 +229,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
                               ),
                     ),
                   ),
-                  const SizedBox(height: 24),
 
-                  // OAuth Separator
+                  const SizedBox(height: 24),
                   const Text(
                     'Or sign up with',
                     style: TextStyle(color: Colors.black54),
                   ),
                   const SizedBox(height: 12),
 
-                  // OAuth Buttons
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
@@ -215,9 +256,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 24),
 
-                  // Already have an account
+                  const SizedBox(height: 24),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [

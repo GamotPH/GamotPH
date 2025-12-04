@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
-import '../../data/providers.dart'; // <- where keyMetricsProvider lives
+import '../../data/providers.dart'; // keyMetricsProvider, topMedicineProvider, metricsRealtimeProvider
 
 class KeyMetricsPanel extends ConsumerWidget {
   final double height;
@@ -93,23 +93,30 @@ class KeyMetricsPanel extends ConsumerWidget {
                           crossAxisSpacing: gap,
                           childAspectRatio: aspect(w),
                           children: [
-                            // Top Medicine tile
+                            // Top Medicine (generic name) tile
                             topMedAsync.when(
                               data: (d) {
                                 // d is (String?, int?)
                                 final String? nameRaw = d.$1;
                                 final int count = d.$2 ?? 0;
+
                                 final String name =
                                     (nameRaw?.trim().isNotEmpty ?? false)
                                         ? nameRaw!.trim()
                                         : '—';
+
+                                String? trendText;
+                                if (count > 0) {
+                                  trendText =
+                                      count == 1
+                                          ? '1 report'
+                                          : '${nf.format(count)} reports';
+                                }
+
                                 return _KpiTile(
                                   title: 'Top Medicine',
                                   bigValue: name,
-                                  trend:
-                                      count > 0
-                                          ? '${nf.format(count)} reports'
-                                          : null,
+                                  trend: trendText,
                                 );
                               },
                               loading:
@@ -123,6 +130,7 @@ class KeyMetricsPanel extends ConsumerWidget {
                                     bigValue: '—',
                                   ),
                             ),
+
                             // Validated Reports tile
                             _KpiTile(
                               title: 'Validated Reports',
@@ -290,17 +298,32 @@ class _KpiTile extends StatelessWidget {
                 margin: const EdgeInsets.only(left: 12),
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
-                  color:
-                      trend!.startsWith('-')
-                          ? Colors.red.shade50
-                          : Colors.green.shade50,
+                  // If trend looks like a delta (+X / -X), color it.
+                  // Otherwise (e.g. "7 reports") use neutral grey.
+                  color: () {
+                    final t = trend!;
+                    final isDelta = t.startsWith('+') || t.startsWith('-');
+                    if (!isDelta) {
+                      return Colors.grey.shade100;
+                    }
+                    return t.startsWith('-')
+                        ? Colors.red.shade50
+                        : Colors.green.shade50;
+                  }(),
                   borderRadius: BorderRadius.circular(16),
                 ),
                 child: Text(
                   trend!,
                   style: TextStyle(
                     fontSize: isPhone ? 11.0 : 12.0,
-                    color: trend!.startsWith('-') ? Colors.red : Colors.green,
+                    color: () {
+                      final t = trend!;
+                      final isDelta = t.startsWith('+') || t.startsWith('-');
+                      if (!isDelta) {
+                        return Colors.grey.shade800;
+                      }
+                      return t.startsWith('-') ? Colors.red : Colors.green;
+                    }(),
                     fontWeight: FontWeight.w600,
                   ),
                 ),
