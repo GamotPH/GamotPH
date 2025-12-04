@@ -33,7 +33,7 @@ class _SymptomsActivityPanelState extends ConsumerState<SymptomsActivityPanel> {
     final async = ref.watch(symptomsProvider);
 
     return SizedBox(
-      height: widget.height, // ← no subtraction; use the exact height passed in
+      height: widget.height,
       child: _Panel(
         title: 'Symptoms Activity',
         trailing: _GroupingButton(
@@ -67,12 +67,14 @@ class _SymptomsActivityPanelState extends ConsumerState<SymptomsActivityPanel> {
                   x: i,
                   barsSpace: 4,
                   barRods: [
+                    // background/ghost bar
                     BarChartRodData(
                       toY: ghost,
                       width: 14,
                       color: Colors.black12,
                       borderRadius: BorderRadius.circular(6),
                     ),
+                    // actual value bar
                     BarChartRodData(
                       toY: buckets[i].total.toDouble(),
                       width: 14,
@@ -96,6 +98,48 @@ class _SymptomsActivityPanelState extends ConsumerState<SymptomsActivityPanel> {
                   gridData: FlGridData(show: false),
                   borderData: FlBorderData(show: false),
                   barGroups: groups,
+
+                  // >>> CLEANER TOOLTIP STYLE <<<
+                  barTouchData: BarTouchData(
+                    enabled: true,
+                    touchTooltipData: BarTouchTooltipData(
+                      // New API: use getTooltipColor instead of tooltipBgColor
+                      getTooltipColor:
+                          (group) =>
+                              Theme.of(
+                                context,
+                              ).colorScheme.surface, // clean, matches card
+
+                      tooltipRoundedRadius: 8,
+                      tooltipPadding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      tooltipMargin: 8,
+
+                      getTooltipItem: (group, groupIndex, rod, rodIndex) {
+                        // Only show for the foreground bar (index 1),
+                        // skip the grey ghost/background bar (index 0)
+                        if (rodIndex != 1) return null;
+
+                        final value = buckets[groupIndex].total;
+
+                        final textStyle =
+                            Theme.of(context).textTheme.bodySmall?.copyWith(
+                              fontWeight: FontWeight.w600,
+                            ) ??
+                            const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                            );
+
+                        // Simple number in a small pill
+                        return BarTooltipItem(value.toString(), textStyle);
+                      },
+                    ),
+                  ),
+
+                  // <<< END TOOLTIP CONFIG <<<
                   titlesData: FlTitlesData(
                     leftTitles: AxisTitles(
                       sideTitles: SideTitles(

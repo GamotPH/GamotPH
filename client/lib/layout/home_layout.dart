@@ -2,7 +2,7 @@ import 'package:client/screens/home/emergency_response_page.dart';
 import 'package:client/screens/home/health_community_page.dart';
 import 'package:client/screens/home/hotlines_page.dart';
 import 'package:client/screens/home/statistics_page.dart';
-import 'package:client/screens/notifications/notifications_page.dart';
+import 'package:client/screens/logs/reportLogs_page.dart';
 import 'package:client/screens/reports/reports_dashboard_page.dart';
 import 'package:client/screens/trends/trends_map_page.dart';
 import 'package:flutter/material.dart';
@@ -19,7 +19,7 @@ enum NavItem {
   scan,
   stats,
   history,
-  notifications,
+  logs,
   profile,
   healthCommunity,
   emergency,
@@ -62,8 +62,8 @@ class HomeLayoutState extends State<HomeLayout> {
         return 'Statistics';
       case NavItem.history:
         return 'History';
-      case NavItem.notifications:
-        return 'Notifications';
+      case NavItem.logs:
+        return 'Report Logs';
       case NavItem.profile:
         return 'Profile';
       case NavItem.healthCommunity:
@@ -106,19 +106,19 @@ class HomeLayoutState extends State<HomeLayout> {
             child: Text("🔒 Please log in to view this section."),
           );
         } else {
-          body = const HistoryScreen(); // ✅ Use the real screen now
+          body = const HistoryScreen();
         }
         break;
       case NavItem.stats:
         body = const StatisticsPage();
         break;
-      case NavItem.notifications:
+      case NavItem.logs:
         if (Supabase.instance.client.auth.currentUser == null) {
           body = const Center(
             child: Text("🔒 Please log in to view this section."),
           );
         } else {
-          body = const NotificationsPage(); // ✅ Use the real screen now
+          body = const ReportLogsPage();
         }
         break;
       case NavItem.profile:
@@ -127,7 +127,7 @@ class HomeLayoutState extends State<HomeLayout> {
             child: Text("🔒 Please log in to view this section."),
           );
         } else {
-          body = const ProfileScreen(); // Replace with real screen
+          body = const ProfileScreen();
         }
         break;
       case NavItem.healthCommunity:
@@ -166,7 +166,6 @@ class HomeLayoutState extends State<HomeLayout> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Page Title
                     if (isDesktop)
                       Container(
                         width: double.infinity,
@@ -180,7 +179,6 @@ class HomeLayoutState extends State<HomeLayout> {
                               ?.copyWith(fontWeight: FontWeight.bold),
                         ),
                       ),
-
                     const Divider(height: 1),
                     Expanded(child: body),
                   ],
@@ -203,7 +201,6 @@ class HomeLayoutState extends State<HomeLayout> {
     return Drawer(
       child: Column(
         children: [
-          // Header
           DrawerHeader(
             decoration: BoxDecoration(color: Colors.deepPurple.shade50),
             child: Align(
@@ -218,27 +215,23 @@ class HomeLayoutState extends State<HomeLayout> {
               ),
             ),
           ),
-
-          // Navigation
           Expanded(
             child: ListView(
               padding: const EdgeInsets.symmetric(horizontal: 8),
               children: [
                 _navTileWithIcon(Icons.show_chart, "Reports", NavItem.home),
                 _navTileWithIcon(Icons.history, "History", NavItem.history),
+                // ✅ Renamed to Report Logs
                 _navTileWithIcon(
                   Icons.notifications,
-                  "Notifications",
-                  NavItem.notifications,
+                  "Report Logs",
+                  NavItem.logs,
                 ),
                 _navTileWithIcon(Icons.person, "Profile", NavItem.profile),
               ],
             ),
           ),
-
           const Divider(),
-
-          // Bottom User Info & Auth
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
             child:
@@ -334,20 +327,16 @@ class HomeLayoutState extends State<HomeLayout> {
 
     return Container(
       width: 240,
-      color: const Color(0xFFF5F6FA), // light neutral background
+      color: const Color(0xFFF5F6FA),
       child: Column(
         children: [
-          // Sidebar brand/logo
           Container(
-            padding: const EdgeInsets.only(
-              top: 16,
-              bottom: 24,
-            ), // reduced padding
+            padding: const EdgeInsets.only(top: 16, bottom: 24),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 SizedBox(
-                  width: 160, // ensure a good width for scale
+                  width: 160,
                   child: Image.asset(
                     'assets/GAMOTPH-LOGO.png',
                     fit: BoxFit.contain,
@@ -356,27 +345,28 @@ class HomeLayoutState extends State<HomeLayout> {
               ],
             ),
           ),
-
-          // Navigation
           Expanded(
             child: ListView(
               padding: const EdgeInsets.symmetric(horizontal: 8),
               children: [
                 _navTileWithIcon(Icons.show_chart, "Reports", NavItem.home),
-                _navTileWithIcon(Icons.history, "Maps", NavItem.trends),
+                // ✅ Map uses location pin icon now
+                _navTileWithIcon(
+                  Icons.location_on_outlined,
+                  "Maps",
+                  NavItem.trends,
+                ),
+                // ✅ Renamed to Report Logs
                 _navTileWithIcon(
                   Icons.notifications,
-                  "Notifications",
-                  NavItem.notifications,
+                  "Report Logs",
+                  NavItem.logs,
                 ),
                 _navTileWithIcon(Icons.person, "Profile", NavItem.profile),
               ],
             ),
           ),
-
           const Divider(),
-
-          // Bottom Section: User Info + Auth Button
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
             child:
@@ -462,14 +452,6 @@ class HomeLayoutState extends State<HomeLayout> {
     );
   }
 
-  // ListTile _navTile(String title, NavItem item) => ListTile(
-  //   title: Text(title),
-  //   selected: selected == item,
-  //   onTap: () {
-  //     setState(() => selected = item);
-  //     Navigator.of(context).maybePop(); // Close drawer
-  //   },
-  // );
   Widget _navTileWithIcon(IconData icon, String title, NavItem item) {
     final isSelected = selected == item;
 

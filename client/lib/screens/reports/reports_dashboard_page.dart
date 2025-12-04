@@ -1,13 +1,13 @@
 // lib/screens/reports/reports_dashboard_page.dart
 import 'dart:ui'; // for FontFeature (kept to avoid breaking imports)
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'filters.dart';
 import 'keyMetrics.dart';
 import 'symptomsActivity.dart';
 import 'clinicalManagement.dart';
 import 'patientExperience.dart';
-// REMOVED: import 'adverseDrugEffects.dart';
 import 'geoTable.dart';
 
 class ReportsDashboardPage extends StatefulWidget {
@@ -19,26 +19,81 @@ class ReportsDashboardPage extends StatefulWidget {
 
 class _ReportsDashboardPageState extends State<ReportsDashboardPage> {
   // Dropdown options
-  final _timeframes = const [
-    'All-time',
-    'Past year',
-    'Past 90 days',
-    'Past 30 days',
-    'Past 7 days',
-  ];
-  final _people = const ['All', 'Adults', 'Seniors', 'Children', 'Pregnant'];
-  final _medicines = const [
+  // Time frame choices for the entire dashboard.
+  final _timeFrames = const ['Daily', 'Weekly', 'Monthly', 'Yearly'];
+
+  // Regions – align these with the regions used in your heat maps.
+  final _regions = const [
     'All',
-    'Paracetamol',
-    'Omeprazole',
-    'Ibuprofen',
-    'Cetirizine',
+    'Ilocos Region',
+    'Cagayan Valley',
+    'Central Luzon',
+    'CALABARZON',
+    'MIMAROPA',
+    'Bicol Region',
+    'Western Visayas',
+    'Central Visayas',
+    'Eastern Visayas',
+    'Zamboanga Peninsula',
+    'Northern Mindanao',
+    'Davao Region',
+    'SOCCSKSARGEN',
+    'CAR',
+    'BARMM',
+    'NCR',
   ];
 
+  List<String> _medicines = ['All'];
+
   // Current selections
-  String _selectedTimeframe = 'All-time';
-  String _selectedPeople = 'All';
+  String _selectedTimeFrame = 'Monthly';
+  String _selectedRegion = 'All';
   String _selectedMedicine = 'All';
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchMedicines();
+  }
+
+  Future<void> _fetchMedicines() async {
+    try {
+      final supabase = Supabase.instance.client;
+
+      // NOTE: column name is genericName, not generic_name
+      final data = await supabase.from('Medicines').select('genericName');
+
+      // data should be a List<dynamic>
+      final uniqueNames = <String>{};
+
+      for (final row in data as List<dynamic>) {
+        // use the correct key from your table: 'genericName'
+        final name = (row['genericName'] as String?)?.trim();
+        if (name != null && name.isNotEmpty) {
+          uniqueNames.add(name);
+        }
+      }
+
+      final sortedNames =
+          uniqueNames.toList()
+            ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+
+      setState(() {
+        _medicines = ['All', ...sortedNames];
+
+        // make sure the selected value is still valid
+        if (!_medicines.contains(_selectedMedicine)) {
+          _selectedMedicine = 'All';
+        }
+      });
+
+      // Optional debug:
+      // debugPrint('Loaded medicines: $_medicines');
+    } catch (e, st) {
+      // Optional: log so you can see errors in the console
+      // debugPrint('Error loading medicines: $e\n$st');
+    }
+  }
 
   // --- Measure Key Metrics height and mirror it onto Symptoms ---
   final GlobalKey _keyMetricsKey = GlobalKey();
@@ -66,20 +121,16 @@ class _ReportsDashboardPageState extends State<ReportsDashboardPage> {
         final bool isTablet = width >= 800 && width < 1200;
         final bool isPhone = width < 800;
 
-        // Adaptive axis and spacing
         final Axis axisForTwoUp =
             (isDesktop || isTablet) ? Axis.horizontal : Axis.vertical;
-        final double outerPadding = isDesktop ? 24 : (isTablet ? 20 : 16);
-        final double gap = isDesktop ? 16 : (isTablet ? 12 : 10);
 
-        // Fallback heights used only before we get a real measurement
-        final double overviewFallbackHeight = isPhone ? 340 : 360;
-        final double midRowHeight = isPhone ? 300 : 280;
+        // Page padding
+        final double outerPadding = isPhone ? 16.0 : 24.0;
+        final double gap = isPhone ? 16.0 : 20.0;
 
-        // Schedule a post-frame read of the Key Metrics size each build.
-        WidgetsBinding.instance.addPostFrameCallback(
-          (_) => _captureKeyMetricsHeight(),
-        );
+        // Card heights (tweak as needed)
+        const double overviewFallbackHeight = 320;
+        const double midRowHeight = 360;
 
         // Helper: Row on wide screens (with Expanded). Column on narrow (no Expanded).
         Widget responsiveGroup({
@@ -115,6 +166,11 @@ class _ReportsDashboardPageState extends State<ReportsDashboardPage> {
           }
         }
 
+        // measure the Key Metrics height after layout
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _captureKeyMetricsHeight();
+        });
+
         return Container(
           color: const Color(0xFFF7F7FB),
           child: SafeArea(
@@ -126,15 +182,15 @@ class _ReportsDashboardPageState extends State<ReportsDashboardPage> {
                 children: [
                   // Filters (full-width)
                   ReportsFilters(
-                    timeframes: _timeframes,
-                    people: _people,
+                    timeFrames: _timeFrames,
+                    regions: _regions,
                     medicines: _medicines,
-                    selectedTimeframe: _selectedTimeframe,
-                    selectedPeople: _selectedPeople,
+                    selectedTimeFrame: _selectedTimeFrame,
+                    selectedRegion: _selectedRegion,
                     selectedMedicine: _selectedMedicine,
-                    onTimeframeChanged:
-                        (v) => setState(() => _selectedTimeframe = v),
-                    onPeopleChanged: (v) => setState(() => _selectedPeople = v),
+                    onTimeFrameChanged:
+                        (v) => setState(() => _selectedTimeFrame = v),
+                    onRegionChanged: (v) => setState(() => _selectedRegion = v),
                     onMedicineChanged:
                         (v) => setState(() => _selectedMedicine = v),
                   ),
@@ -142,31 +198,29 @@ class _ReportsDashboardPageState extends State<ReportsDashboardPage> {
 
                   // === Overview row (Key Metrics + Symptoms Activity) ===
                   if (axisForTwoUp == Axis.horizontal)
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                    responsiveGroup(
+                      axis: axisForTwoUp,
+                      gap: gap,
                       children: [
-                        // LEFT: Key Metrics (measured)
-                        Expanded(
-                          child: KeyedSubtree(
-                            key: _keyMetricsKey,
-                            child: const KeyMetricsPanel(),
-                          ),
+                        // Key Metrics
+                        KeyedSubtree(
+                          key: _keyMetricsKey,
+                          child: const KeyMetricsPanel(),
                         ),
-                        SizedBox(width: gap),
-                        // RIGHT: Symptoms (match measured height)
-                        Expanded(
-                          child: SizedBox(
+
+                        // Symptoms Activity
+                        SizedBox(
+                          height:
+                              _measuredKeyMetricsHeight ??
+                              overviewFallbackHeight,
+                          child: SymptomsActivityPanel(
                             height:
                                 _measuredKeyMetricsHeight ??
                                 overviewFallbackHeight,
-                            child: SymptomsActivityPanel(
-                              height:
-                                  _measuredKeyMetricsHeight ??
-                                  overviewFallbackHeight,
-                              timeframe: _selectedTimeframe,
-                              people: _selectedPeople,
-                              medicine: _selectedMedicine,
-                            ),
+                            timeframe: _selectedTimeFrame,
+                            // pass region through the existing "people" prop
+                            people: _selectedRegion,
+                            medicine: _selectedMedicine,
                           ),
                         ),
                       ],
@@ -188,8 +242,8 @@ class _ReportsDashboardPageState extends State<ReportsDashboardPage> {
                             height:
                                 _measuredKeyMetricsHeight ??
                                 overviewFallbackHeight,
-                            timeframe: _selectedTimeframe,
-                            people: _selectedPeople,
+                            timeframe: _selectedTimeFrame,
+                            people: _selectedRegion,
                             medicine: _selectedMedicine,
                           ),
                         ),
@@ -230,7 +284,7 @@ class _ReportsDashboardPageState extends State<ReportsDashboardPage> {
   }
 }
 
-/// --- Lightweight "copyWithHeight" helpers ---
+// === Helper extensions to easily tweak card heights without changing constructors ===
 extension _PanelHeight on KeyMetricsPanel {
   KeyMetricsPanel copyWithHeight(double h) =>
       KeyMetricsPanel(height: h, key: key);

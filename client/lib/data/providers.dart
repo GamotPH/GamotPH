@@ -17,7 +17,8 @@ final repoProvider = Provider<AnalyticsRepository>(
   (ref) => AnalyticsRepository(supa.Supabase.instance.client),
 );
 
-// FAMILY providers (important!)
+/* ------------------------------ FAMILY providers -------------------------- */
+
 final genericNameListProvider = FutureProvider.autoDispose
     .family<List<String>, String?>((ref, brandName) async {
       final repo = ref.read(repoProvider);
@@ -76,8 +77,55 @@ class PieSeries {
 /// Geo table model (matches rpc_geo_distribution -> geo_location, reports)
 class GeoRow {
   final String location;
+  final int activeUsers; // distinct userID count
   final int reports;
-  GeoRow({required this.location, required this.reports});
+
+  GeoRow({
+    required this.location,
+    required this.activeUsers,
+    required this.reports,
+  });
+}
+
+/// Report Logs
+class ReportLogItem {
+  final int id;
+  final DateTime createdAt;
+  final String location;
+  final String medicineGeneric;
+  final String medicineBrand;
+  final String severity;
+  final String reactionDescription;
+
+  // New fields
+  final String patientGender;
+  final String patientAge;
+  final String patientWeight;
+  final String reasonForTaking;
+  final String foodIntake;
+  final String? drugImageUrl; // nullable – may not exist
+
+  const ReportLogItem({
+    required this.id,
+    required this.createdAt,
+    required this.location,
+    required this.medicineGeneric,
+    required this.medicineBrand,
+    required this.severity,
+    required this.reactionDescription,
+    required this.patientGender,
+    required this.patientAge,
+    required this.patientWeight,
+    required this.reasonForTaking,
+    required this.foodIntake,
+    required this.drugImageUrl,
+  });
+
+  String get displayMedicine {
+    if (medicineGeneric.trim().isNotEmpty) return medicineGeneric.trim();
+    if (medicineBrand.trim().isNotEmpty) return medicineBrand.trim();
+    return 'Unknown medicine';
+  }
 }
 
 /* ------------------------------ Data providers ---------------------------- */
@@ -106,6 +154,7 @@ final geoDistributionProvider = FutureProvider.autoDispose<List<GeoRow>>((
   final client = supa.Supabase.instance.client;
   final f = ref.watch(filterProvider);
 
+  // 1) Get base "reports per geoLocation" like before (RPC).
   final result =
       await client
           .rpc(
@@ -115,7 +164,7 @@ final geoDistributionProvider = FutureProvider.autoDispose<List<GeoRow>>((
               'end_ts': f.end.toIso8601String(),
             },
           )
-          .select(); // RPC returns SETOF rows
+          .select(); // returns [{ geo_location, reports }, ...]
 
   String normalize(String? s) {
     if (s == null) return 'Unknown';
@@ -126,27 +175,263 @@ final geoDistributionProvider = FutureProvider.autoDispose<List<GeoRow>>((
   }
 
   final List<dynamic> list = result as List<dynamic>;
-  final rows =
-      list
-          .map((m) {
-            final row = m as Map<String, dynamic>;
-            return GeoRow(
-              location: normalize(row['geo_location'] as String?),
-              reports: (row['reports'] as num?)?.toInt() ?? 0,
-            );
-          })
-          .where((r) => r.location != 'Unknown' && r.reports > 0)
-          .toList()
-        ..sort((a, b) => b.reports.compareTo(a.reports));
 
+  // 2) Build a map of normalized location -> reports (from RPC)
+  final Map<String, int> reportsByLoc = {};
+  for (final m in list) {
+    final row = m as Map<String, dynamic>;
+    final loc = normalize(row['geo_location'] as String?);
+    if (loc == 'Unknown') continue;
+    final rep = (row['reports'] as num?)?.toInt() ?? 0;
+    if (rep <= 0) continue;
+    reportsByLoc[loc] = (reportsByLoc[loc] ?? 0) + rep;
+  }
+
+  if (reportsByLoc.isEmpty) return [];
+
+  // 3) Get distinct userID per geoLocation from ADR_Reports.
+  final adrRows = await client
+      .from('ADR_Reports')
+      .select('geoLocation, userID')
+      .gte('created_at', f.start.toIso8601String())
+      .lt('created_at', f.end.toIso8601String());
+
+  final Map<String, Set<String>> usersByLoc = {};
+  for (final row in adrRows as List<dynamic>) {
+    final loc = normalize(row['geoLocation'] as String?);
+    if (loc == 'Unknown') continue;
+    final uid = (row['userID'] ?? '').toString().trim();
+    if (uid.isEmpty) continue;
+
+    usersByLoc.putIfAbsent(loc, () => <String>{}).add(uid);
+  }
+
+  // 4) Build final rows with activeUsers + reports.
+  final rows = <GeoRow>[
+    for (final entry in reportsByLoc.entries)
+      GeoRow(
+        location: entry.key,
+        reports: entry.value,
+        activeUsers: usersByLoc[entry.key]?.length ?? 0,
+      ),
+  ];
+
+  // sort by reports desc
+  rows.sort((a, b) => b.reports.compareTo(a.reports));
   return rows;
 });
 
+/// 🔹 Report logs (live ADR list, role-aware, no SQL join)
+/// 🔹 Report logs (live ADR list, role-aware, no SQL join)
+final reportLogsProvider = FutureProvider.autoDispose<List<ReportLogItem>>((
+  ref,
+) async {
+  final client = supa.Supabase.instance.client;
+  final f = ref.watch(filterProvider);
+
+  final user = client.auth.currentUser;
+  if (user == null) return const <ReportLogItem>[];
+
+  // Assume role + pharmaco are stored in user metadata
+  final meta = user.userMetadata ?? {};
+  final role = (meta['role'] as String?)?.toLowerCase();
+  final pharmacoId = meta['pharma_company_id'] ?? meta['pharmaco_id'];
+
+  /* ───────── 1) Fetch ADR_Reports rows in time range ───────── */
+
+  // 👇 IMPORTANT: use the real column names from your ADR_Reports table
+  final rawAdrs =
+      await client
+              .from('ADR_Reports')
+              .select('''
+        reportID,
+        created_at,
+        geoLocation,
+        reactionDescription,
+        severity,
+        userID,
+        medicineId,
+        patientGender,
+        patientAge,
+        patientWeight,
+        reasonForTaking,
+        foodIntake,
+        drug_image_url
+      ''')
+              .gte('created_at', f.start.toIso8601String())
+              .lt('created_at', f.end.toIso8601String())
+          as List<dynamic>;
+
+  if (rawAdrs.isEmpty) return const <ReportLogItem>[];
+
+  /* ───────── 2) Collect medicineIds and fetch Medicines (no .in_()) ───────── */
+
+  final Set<String> medIds = {};
+  for (final row in rawAdrs) {
+    final medIdRaw = row['medicineId'];
+    if (medIdRaw == null) continue;
+    medIds.add(medIdRaw.toString());
+  }
+
+  Map<String, Map<String, dynamic>> medsById = {};
+  if (medIds.isNotEmpty) {
+    // Table is small, so we can safely load all and map in Dart.
+    final meds =
+        await client
+                .from('Medicines')
+                .select('id, genericName, brandName, pharma_company_id')
+            as List<dynamic>;
+
+    medsById = {
+      for (final m in meds)
+        (m['id'] as int).toString(): m as Map<String, dynamic>,
+    };
+  }
+
+  /* ───────── 3) Role-based filter ───────── */
+
+  Iterable<dynamic> filteredAdrs = rawAdrs;
+
+  if (role == 'pharmaco' && pharmacoId != null) {
+    // keep only ADRs whose medicine's pharmaco matches
+    filteredAdrs = rawAdrs.where((row) {
+      final medIdRaw = row['medicineId'];
+      if (medIdRaw == null) return false;
+      final med = medsById[medIdRaw.toString()];
+      if (med == null) return false;
+      final pc = med['pharma_company_id'];
+      return pc != null && pc.toString() == pharmacoId.toString();
+    });
+  } else if (role == 'user') {
+    // end users only see their own reports
+    filteredAdrs = rawAdrs.where((row) {
+      final uid = (row['userID'] ?? '').toString();
+      return uid == user.id;
+    });
+  }
+  // 'fda' or anything else → see everything
+
+  String _clean(dynamic v) => (v ?? '').toString().trim();
+
+  /* ───────── 4) Map to ReportLogItem and sort by date desc ───────── */
+
+  final items =
+      filteredAdrs.map<ReportLogItem>((row) {
+        final medIdRaw = row['medicineId'];
+        final med =
+            medIdRaw == null
+                ? null
+                : medsById[medIdRaw.toString()]; // may be null
+
+        final generic = (med?['genericName'] as String?)?.trim() ?? '';
+        final brand = (med?['brandName'] as String?)?.trim() ?? '';
+
+        final created =
+            DateTime.tryParse(row['created_at'] as String? ?? '')?.toLocal() ??
+            DateTime.now();
+
+        final image = _clean(row['imageUrl']);
+
+        return ReportLogItem(
+          id: (row['reportID'] as num?)?.toInt() ?? 0,
+          createdAt: created,
+          location: _clean(row['geoLocation']),
+          medicineGeneric: generic,
+          medicineBrand: brand,
+          severity: _clean(row['severity']),
+          reactionDescription: _clean(row['reactionDescription']),
+          patientGender: _clean(row['patientGender']), // 👈 from patientGender
+          patientAge: _clean(row['patientAge']), // 👈 from patientAge
+          patientWeight: _clean(row['patientWeight']), // 👈 from patientWeight
+          reasonForTaking: _clean(row['reasonForTaking']),
+          foodIntake: _clean(row['foodIntake']),
+          drugImageUrl: image.isEmpty ? null : image,
+        );
+      }).toList();
+
+  // Newest first
+  items.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+  return items;
+});
+
+/// 🔹 Top medicine by GENERIC NAME within the current filter's time range.
 final topMedicineProvider = FutureProvider.autoDispose<(String?, int?)>((
   ref,
 ) async {
   final f = ref.watch(filterProvider);
-  return ref.watch(repoProvider).topMedicine(f.start, f.end);
+  final client = supa.Supabase.instance.client;
+
+  // 1. Get all ADR reports in range, with medicineId.
+  final adrs = await client
+      .from('ADR_Reports')
+      .select('medicineId')
+      .gte('created_at', f.start.toIso8601String())
+      .lt('created_at', f.end.toIso8601String());
+  // 🔴 DO NOT filter on is_live here, your data uses 0 and you'd get 0 rows.
+
+  if (adrs.isEmpty) {
+    return (null, 0);
+  }
+
+  // Count ADR rows per medicineId (stringified to be safe).
+  final Map<String, int> countsByMedId = {};
+  for (final row in adrs as List<dynamic>) {
+    final medIdRaw = row['medicineId'];
+    if (medIdRaw == null) continue;
+    final medId = medIdRaw.toString();
+    if (medId.isEmpty) continue;
+
+    countsByMedId[medId] = (countsByMedId[medId] ?? 0) + 1;
+  }
+
+  if (countsByMedId.isEmpty) {
+    return (null, 0);
+  }
+
+  // 2. Fetch ALL medicines (table is small) and map id -> genericName.
+  final meds = await client.from('Medicines').select('id, genericName');
+
+  if (meds.isEmpty) {
+    return (null, 0);
+  }
+
+  // 3. Aggregate counts by genericName (case-insensitive).
+  final Map<String, int> countsByGeneric = {};
+  final Map<String, String> displayNames = {}; // pretty casing
+
+  for (final m in meds as List<dynamic>) {
+    final idRaw = m['id'];
+    if (idRaw == null) continue;
+    final id = idRaw.toString();
+
+    final genericRaw = (m['genericName'] as String?)?.trim();
+    if (genericRaw == null || genericRaw.isEmpty) continue;
+
+    final key = genericRaw.toLowerCase(); // canonical generic name
+    final medCount = countsByMedId[id] ?? 0;
+    if (medCount == 0) continue; // medicine has no ADRs in this time range
+
+    countsByGeneric[key] = (countsByGeneric[key] ?? 0) + medCount;
+    displayNames[key] = displayNames[key] ?? genericRaw;
+  }
+
+  if (countsByGeneric.isEmpty) {
+    return (null, 0);
+  }
+
+  // 4. Pick generic with highest total ADR count.
+  String bestKey = countsByGeneric.keys.first;
+  int bestCount = countsByGeneric[bestKey]!;
+
+  countsByGeneric.forEach((k, v) {
+    if (v > bestCount) {
+      bestKey = k;
+      bestCount = v;
+    }
+  });
+
+  final bestName = displayNames[bestKey];
+  return (bestName, bestCount);
 });
 
 final clinicalManagementProvider = FutureProvider.autoDispose<ClinicalSeries>((
@@ -405,8 +690,6 @@ final trendsProvider = FutureProvider.autoDispose
 
 /* ------------------------------ Realtime invalidation --------------------- */
 
-// lib/data/providers.dart
-
 final metricsRealtimeProvider = Provider<void>((ref) {
   final client = supa.Supabase.instance.client;
 
@@ -414,9 +697,8 @@ final metricsRealtimeProvider = Provider<void>((ref) {
   ref.onDispose(() => isDisposed = true);
 
   void deferInvalidateAll() {
-    // Run after the current build; bail out if provider got disposed.
-    // wherever you do realtime -> invalidate:
     Future.microtask(() {
+      if (isDisposed) return;
       ref.invalidate(keyMetricsProvider);
       ref.invalidate(symptomsProvider);
       ref.invalidate(wordCloudProvider);
@@ -425,6 +707,7 @@ final metricsRealtimeProvider = Provider<void>((ref) {
       ref.invalidate(clinicalManagementProvider);
       ref.invalidate(adverseReactionsProvider);
       ref.invalidate(trendsProvider);
+      ref.invalidate(reportLogsProvider);
     });
   }
 

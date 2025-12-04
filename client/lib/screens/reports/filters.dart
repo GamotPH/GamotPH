@@ -2,113 +2,169 @@
 import 'package:flutter/material.dart';
 
 class ReportsFilters extends StatelessWidget {
-  final List<String> timeframes;
-  final List<String> people;
+  final List<String> timeFrames;
+  final List<String> regions;
   final List<String> medicines;
 
-  final String selectedTimeframe;
-  final String selectedPeople;
+  final String selectedTimeFrame;
+  final String selectedRegion;
   final String selectedMedicine;
 
-  final ValueChanged<String> onTimeframeChanged;
-  final ValueChanged<String> onPeopleChanged;
+  final ValueChanged<String> onTimeFrameChanged;
+  final ValueChanged<String> onRegionChanged;
   final ValueChanged<String> onMedicineChanged;
 
   const ReportsFilters({
     super.key,
-    required this.timeframes,
-    required this.people,
+    required this.timeFrames,
+    required this.regions,
     required this.medicines,
-    required this.selectedTimeframe,
-    required this.selectedPeople,
+    required this.selectedTimeFrame,
+    required this.selectedRegion,
     required this.selectedMedicine,
-    required this.onTimeframeChanged,
-    required this.onPeopleChanged,
+    required this.onTimeFrameChanged,
+    required this.onRegionChanged,
     required this.onMedicineChanged,
   });
 
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
-      builder: (context, c) {
-        final w = c.maxWidth;
+      builder: (context, constraints) {
+        final isNarrow = constraints.maxWidth < 800;
+        const gap = 12.0;
 
-        // Breakpoints: 3 cols (desktop), 2 cols (tablet), 1 col (phone)
-        final int cols = w >= 1000 ? 3 : (w >= 640 ? 2 : 1);
-        const double spacing = 12.0;
-        final double itemWidth =
-            cols == 1 ? w : (w - spacing * (cols - 1)) / cols;
-
-        List<Widget> fields = [
-          SizedBox(
-            width: itemWidth,
-            child: _FilterDropdown<String>(
-              label: 'Timeframe',
-              value: selectedTimeframe,
-              items: timeframes,
-              onChanged: (v) => onTimeframeChanged(v!),
-            ),
-          ),
-          SizedBox(
-            width: itemWidth,
-            child: _FilterDropdown<String>(
-              label: 'People',
-              value: selectedPeople,
-              items: people,
-              onChanged: (v) => onPeopleChanged(v!),
-            ),
-          ),
-          SizedBox(
-            width: itemWidth,
-            child: _FilterDropdown<String>(
-              label: 'Medicine',
-              value: selectedMedicine,
-              items: medicines,
-              onChanged: (v) => onMedicineChanged(v!),
-            ),
-          ),
-        ];
-
-        return Wrap(spacing: spacing, runSpacing: spacing, children: fields);
+        if (isNarrow) {
+          // Phone / narrow tablet: stack vertically, each fills width
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _FilterField(
+                label: 'Time frame',
+                child: GenericDropdown<String>(
+                  items: timeFrames,
+                  value: selectedTimeFrame,
+                  onChanged: onTimeFrameChanged,
+                ),
+              ),
+              const SizedBox(height: gap),
+              _FilterField(
+                label: 'Region',
+                child: GenericDropdown<String>(
+                  items: regions,
+                  value: selectedRegion,
+                  onChanged: onRegionChanged,
+                ),
+              ),
+              const SizedBox(height: gap),
+              _FilterField(
+                label: 'Medicine',
+                child: GenericDropdown<String>(
+                  items: medicines,
+                  value: selectedMedicine,
+                  onChanged: onMedicineChanged,
+                ),
+              ),
+            ],
+          );
+        } else {
+          // Desktop / wide tablet: three equal columns spanning full width
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Expanded(
+                child: _FilterField(
+                  label: 'Time frame',
+                  child: GenericDropdown<String>(
+                    items: timeFrames,
+                    value: selectedTimeFrame,
+                    onChanged: onTimeFrameChanged,
+                  ),
+                ),
+              ),
+              const SizedBox(width: gap),
+              Expanded(
+                child: _FilterField(
+                  label: 'Region',
+                  child: GenericDropdown<String>(
+                    items: regions,
+                    value: selectedRegion,
+                    onChanged: onRegionChanged,
+                  ),
+                ),
+              ),
+              const SizedBox(width: gap),
+              Expanded(
+                child: _FilterField(
+                  label: 'Medicine',
+                  child: GenericDropdown<String>(
+                    items: medicines,
+                    value: selectedMedicine,
+                    onChanged: onMedicineChanged,
+                  ),
+                ),
+              ),
+            ],
+          );
+        }
       },
     );
   }
 }
 
-class _FilterDropdown<T> extends StatelessWidget {
+class _FilterField extends StatelessWidget {
   final String label;
-  final T value;
-  final List<T> items;
-  final ValueChanged<T?> onChanged;
+  final Widget child;
 
-  const _FilterDropdown({
-    required this.label,
-    required this.value,
+  const _FilterField({required this.label, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: Theme.of(
+            context,
+          ).textTheme.labelMedium?.copyWith(fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 6),
+        child,
+      ],
+    );
+  }
+}
+
+/// Simple reusable dropdown used by the filters.
+class GenericDropdown<T> extends StatelessWidget {
+  final List<T> items;
+  final T value;
+  final ValueChanged<T> onChanged;
+
+  const GenericDropdown({
+    super.key,
     required this.items,
+    required this.value,
     required this.onChanged,
   });
 
   @override
   Widget build(BuildContext context) {
-    final isPhone = MediaQuery.sizeOf(context).width < 640;
     return DropdownButtonFormField<T>(
       value: value,
-      onChanged: onChanged,
-      isDense: true,
-      icon: const Icon(Icons.expand_more),
+      isExpanded: true,
       decoration: InputDecoration(
-        labelText: label,
-        filled: true,
-        fillColor: Colors.white,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide.none,
-        ),
-        contentPadding: EdgeInsets.symmetric(
+        isDense: true,
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+        contentPadding: const EdgeInsets.symmetric(
           horizontal: 12,
-          vertical: isPhone ? 8 : 10,
+          vertical: 10,
         ),
       ),
+      onChanged: (v) {
+        if (v != null) onChanged(v);
+      },
       items:
           items
               .map(

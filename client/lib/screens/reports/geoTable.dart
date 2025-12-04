@@ -4,11 +4,18 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../data/providers.dart';
 
-class GeoTablePanel extends ConsumerWidget {
+class GeoTablePanel extends ConsumerStatefulWidget {
   const GeoTablePanel({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<GeoTablePanel> createState() => _GeoTablePanelState();
+}
+
+class _GeoTablePanelState extends ConsumerState<GeoTablePanel> {
+  bool _showAll = false;
+
+  @override
+  Widget build(BuildContext context) {
     final rowsAsync = ref.watch(geoDistributionProvider);
     final nf = NumberFormat.decimalPattern();
 
@@ -33,13 +40,18 @@ class GeoTablePanel extends ConsumerWidget {
             );
           }
 
+          // rows are already sorted by reports desc in the provider
+          final visibleRows =
+              _showAll ? rows : rows.take(5).toList(growable: false);
+
           return LayoutBuilder(
             builder: (context, c) {
               final w = c.maxWidth;
               final bool isPhone = w < 640;
 
-              final double minTableWidth = isPhone ? 520.0 : 640.0;
-              final double columnSpacing = isPhone ? 18.0 : 28.0;
+              // Make the table fill the available width; scroll only if it grows wider.
+              final double minTableWidth = w;
+              final double columnSpacing = isPhone ? 18.0 : 24.0;
               final double headingRowHeight = isPhone ? 40.0 : 48.0;
               final double dataRowHeight = isPhone ? 36.0 : 44.0;
 
@@ -47,35 +59,78 @@ class GeoTablePanel extends ConsumerWidget {
                 columnSpacing: columnSpacing,
                 columns: const [
                   DataColumn(label: _Hdr('Location')),
+                  // not numeric so we can center the text ourselves
+                  DataColumn(label: _Hdr('Active users'), numeric: false),
                   DataColumn(label: _Hdr('Reports'), numeric: true),
                 ],
                 rows:
-                    rows
+                    visibleRows
                         .map(
                           (r) => DataRow(
                             cells: [
-                              // EXACTLY TWO CELLS — no spacer!
+                              // Location – left, with widest area
                               DataCell(_Cell(r.location)),
-                              DataCell(_Cell(nf.format(r.reports))),
+                              // Active users – centered in its column
+                              DataCell(
+                                _Cell(
+                                  nf.format(r.activeUsers),
+                                  align: TextAlign.center,
+                                ),
+                              ),
+                              // Reports – right aligned
+                              DataCell(
+                                _Cell(
+                                  nf.format(r.reports),
+                                  align: TextAlign.right,
+                                ),
+                              ),
                             ],
                           ),
                         )
                         .toList(),
               );
 
-              return DataTableTheme(
-                data: DataTableThemeData(
-                  headingRowHeight: headingRowHeight,
-                  dataRowMinHeight: dataRowHeight,
-                  dataRowMaxHeight: dataRowHeight,
-                ),
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(minWidth: minTableWidth),
-                    child: table,
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // Top row: "showing X of Y" + toggle button
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        _showAll
+                            ? 'Showing all ${rows.length} locations'
+                            : 'Showing top ${visibleRows.length} of ${rows.length} locations',
+                        style: Theme.of(
+                          context,
+                        ).textTheme.bodySmall?.copyWith(color: Colors.black54),
+                      ),
+                      TextButton(
+                        onPressed: () {
+                          setState(() {
+                            _showAll = !_showAll;
+                          });
+                        },
+                        child: Text(_showAll ? 'Show top 5' : 'Show all'),
+                      ),
+                    ],
                   ),
-                ),
+                  const SizedBox(height: 8),
+                  DataTableTheme(
+                    data: DataTableThemeData(
+                      headingRowHeight: headingRowHeight,
+                      dataRowMinHeight: dataRowHeight,
+                      dataRowMaxHeight: dataRowHeight,
+                    ),
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(minWidth: minTableWidth),
+                        child: table,
+                      ),
+                    ),
+                  ),
+                ],
               );
             },
           );
@@ -103,12 +158,15 @@ class _Hdr extends StatelessWidget {
 
 class _Cell extends StatelessWidget {
   final String text;
-  const _Cell(this.text);
+  final TextAlign align;
+  const _Cell(this.text, {this.align = TextAlign.left});
+
   @override
   Widget build(BuildContext context) {
     final isPhone = MediaQuery.sizeOf(context).width < 640;
     return Text(
       text,
+      textAlign: align,
       overflow: TextOverflow.ellipsis,
       softWrap: false,
       style: Theme.of(
