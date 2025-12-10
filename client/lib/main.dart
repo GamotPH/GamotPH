@@ -1,4 +1,5 @@
 // lib/main.dart
+// flutter run -d chrome --web-port=54296
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:supabase_flutter/supabase_flutter.dart' as supabase;

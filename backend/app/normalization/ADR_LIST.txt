@@ -1,0 +1,674 @@
+Fever
+Increased temperature
+Feeling warm
+Febrile
+Pyrexia
+Feverish
+Elevated body temperature
+Fatigue
+Exhausted
+Tiredness
+Lethargic
+Asthenia
+Weakness
+No energy
+Frailty
+Poor strength
+Lack of energy
+Chills
+Shaking
+Shivering
+Rigors
+Trembling
+Sweating
+Perspiration
+Diaphoresis
+Dripping with sweat
+Weight loss
+Slimming down
+Becoming thin
+Losing pounds
+Cachexia
+Weight gain
+Getting heavier
+Increasing mass
+Becoming fat
+Becoming chubby
+Becoming plump
+Obesity
+Dizziness
+Lightheadedness
+Unsteadiness
+Vertigo-like
+Swimming of the head
+Headache
+Migraine
+Head hurts
+Head splitting
+Cephalalgia
+Sore head
+Throbbing head
+Seizures
+Convulsion
+Fit
+Attack
+Body spasm
+Uncontrolled stiffness
+Muscle contractions
+Uncontrolled shaking of the body
+Epilepsy
+Numbness
+Paresthesia
+Loss of sensation
+Loss of feeling
+Tingling sensation
+Memory loss
+forgetfulness
+cognitive impairment
+absentmindedness
+blank
+cannot remember things
+foggy memory
+memory lapse
+amnesia
+fugue
+Nausea
+feels like vomiting
+seasickness
+gagging
+feeling sick to your stomach
+unpleasant feeling in the stomach
+Vomiting
+retching
+Stomach pain
+stomach pain
+upset stomach
+Diarrhea
+loose stools
+frequent stools
+frequent defecation
+frequent bowel movement
+loose bowel movement
+LBM
+Dysentery
+Always pooping
+Watery stool
+Constipation
+infrequent bowel movement
+hard stools
+feeling of incomplete evacuation
+cannot poop
+Loss of appetite
+anorexia
+no appetite
+cannot eat
+reduced appetite
+food aversion
+decreased appetite
+no desire to eat
+inappetence
+not feeling hungry
+Rash
+dermatitis
+skin eruption
+skin lesion
+exanthem
+skin breakout
+Itching
+Pruritus
+Hives
+Urticaria
+Wheals
+Itchy welts
+Itchy skin patches
+Allergic rash
+Nettle rash
+Elevated rash
+Blisters
+Skin vesicles
+Pustules
+Fluid-filled rashes
+Peeling of skin
+Skin desquamation
+Shedding of skin
+Scaling
+Skin exfoliation
+Swelling
+Edema
+Puffiness
+Engorgement
+Lumps
+Bumps
+Shortness of breath
+Dyspnea
+Difficulty of breathing
+Chest tightness
+Breathlessness
+Choking
+Gasping
+Out of breath
+Coughing
+Tussis
+Throwing out phlegm
+Hacking
+Barking
+Whoop
+Expectorate
+Spitting out
+Wheezing
+Whistle sound when breathing
+Asthmatic sound when breathing
+Sibilant ronchus
+High-pitched breathing sound
+Chest tightness
+Pressure in chest
+Squeezing feeling in the chest
+Chest heaviness
+Palpitation
+Pounding heartbeat
+Irregular heartbeat
+Rapid heartbeat
+Tachycardia
+Fast heartbeat
+Heart is racing
+Slow heartbeat
+Bradycardia
+Bradyarrhythmia
+Slow heart rate
+High blood pressure
+Hypertension
+Blood pressure greater than normal
+Shooting blood pressure
+Raised blood pressure
+Low blood pressure
+Hypotension
+Dropping blood pressure
+Chest pain
+Angina
+Chest discomfort
+Pressure in the chest
+Muscle pain
+Myalgia
+Sore muscles
+Muscle ache
+Muscle weakness
+Asthenia
+Muscle fatigue
+Loss of muscle strength
+Muscle exhaustion
+Weak muscles
+Joint pain
+Arthralgia
+Joint aches
+Joint soreness
+Joint discomfort
+Joint stiffness
+Difficulty moving joints
+Cannot move joints
+Joint tightness
+Bleeding
+Hemorrhage
+Exsanguination
+Blood loss
+Bruising
+Contusions
+Hematoma
+Petechia
+Organ failure
+Lagnat
+Mainit ang pakiramdam
+Mataas na temperature ng katawan
+Sinat
+Pagkapagod
+Madaling mapagod
+Pagkahapo
+Hapong hapo
+Pagal
+Panghihina
+Mahina
+Nanlalambot
+Walang lakas
+Nanlulumo
+Panginginig
+Panlalamig
+Pangangatog
+Pangangatal
+Pagpapawis
+Basa sa pawis
+Pamamayat
+Pagbaba ng timbang
+Pagpayat
+Pagbawas ng timbang
+Pagtaba
+Pagdagdag ng timbang
+Tumataba
+Pagkahilo
+Umiikot ang paningin
+Umiikot ang paligid
+Parang matutumba
+Dumidilim ang paningin
+Sakit ng ulo
+Parang binibiyak ang ulo
+Kombulsyon
+Pangingisay
+Paninigas ng katawan
+Pamamanhid
+Walang pakiramdam
+Tusok-tusok
+Pamimitig
+Pangingimi
+Pagkalimot
+Pagkawala ng alaala
+Madaling makalimot
+Mahirap makatanda
+Walang memorya
+Mahirap makaalala
+Naduduwal
+Pagduduwal
+Nasusuka
+Parang masusuka
+Pagsusuka
+Inilabas ang kinain
+Pananakit ng tiyan
+Humihilab ang tiyan
+Mahapdi ang tiyan
+Pagtatae
+Madalas na pagdumi
+Malambot ang dumi
+Bulos
+Binubulos
+Pagtitibi
+Hindi madumi
+Hindi matae
+Matigas ang dumi
+Walang gana sa pagkain
+Ayaw kumain
+Hindi pagkagutom
+Pantal
+Pamamantal
+Pamumula sa balat
+Panangati
+Makati
+Nakakakamot
+Pantal
+Paltos
+Matubig na pantal
+Lapnos
+Pamamalat
+Natutuklap ang balat
+Pamamaga
+Manas
+Maga
+Nahihirapan huminga
+Kinakapos sa paghinga
+Hindi makahinga
+Parang sinasakal
+Ubo
+Pag-ubo
+Kumakahol
+Hagukhok
+Sipol sa paghinga
+Tunog sipol ang hinga
+Matinis na tunog sa paghinga
+Humahagok
+Pagsikip ng dibdib
+Pagbigat ng dibdib
+Paninikip ng dibdib
+Mabilis na pagtibok ng puso
+Mabagal na pagtibok ng puso
+Mataas na presyon
+Altapresyon
+Tumataas ang presyon dugo
+Mababang presyon
+Mababa ang presyon dugo
+Bumabagsak ang presyon ng dugo
+Pagsakit ng dibdib
+Parang may nakadagan sa dibdib
+Pananakit ng kalamnan
+Panghihina ng kalamnan
+Pananakit ng kasu-kasuan
+Paninigas ng kasu-kasuan
+Pagdurugo
+Pasa
+Hilanat
+Init ang lawas
+Taas nga temperatura sa lawas
+Hinay nga hilanat
+Kapoy
+Dali kapoyon
+Kapoy kaayo
+Kapoy kaayo
+Kapoy
+Kaluya
+Luya
+Maluya
+Walay kusog
+Naluya
+Pangurog
+Tugnaw
+Nagkurog
+Pagpangurog
+Pagpaningot
+Basang singot
+Pagkaluya
+Pagkawala sa timbang
+Pagkahuyang
+Pagminus sa timbang
+Pagdako
+Pagdugang sa timbang
+Nidako
+Paglibog
+Naglibot ang pananaw
+Naglibot ang palibot
+Murag matumba
+Nagngitngit ang pananaw
+Sakit sa ulo
+Murag mabungkag ang ulo
+Kombulsyon
+Nagkurog
+Pagpanuko sa lawas
+Pagkamanhid
+Walay pagbati
+Tuslok-tuslok
+Pagpanuko
+Pagkakulba
+Kalimot
+Kawad-on sa hinumduman
+Dali malimtan
+Lisod makahinumdum
+Walay memorya
+Lisod makahinomdom
+Pagpaniklop sa tiyan
+Pagpaniklop sa hilo
+Pagduduwal
+Gusto mosuka
+Murag mosuka
+Pagsuka
+Gipaawas ang pagkaon
+Sakit sa tiyan
+Naglabad ang tiyan
+Masakit ang tiyan
+Pagtayay
+Pirmi magdumi
+Malumo ang tae
+Bulhot
+Gibulhot
+Lisod pagdumi
+Dili magdumi
+Lisod motae
+Ligon nga tae
+Walay gana mokaon
+Dili mokaon
+Dili gutom
+Pantal
+Pangpantal
+Pagkapula sa panit
+Kati
+Makati
+Makangutkot
+Pantal
+Paltos
+Tubigong pantal
+Lapnos
+Pagkakupas sa panit
+pagpamalat
+Nangakupas ang panit
+Hubag
+Manas
+Namaga
+Lisod ginhawa
+Kulang sa ginhawa
+Dili makaginawa
+Murag gilansang
+Ubo
+Pag-ubo
+Kahol kahol
+barky
+Hagok
+Sipol sa ginhawa
+Sipolon ang ginhawa
+Hait nga tunog sa ginhawa
+Naghuros
+Paghuot sa dughan
+Bugat sa dughan
+Paghuot sa dughan
+Paspas nga pagtibok sa kasingkasing
+Hinay nga pagtibok sa kasingkasing
+Taas nga presyon
+Altapresyon
+Misaka ang presyon sa dugo
+Ubos nga presyon
+Ubos nga presyon sa dugo
+Mibagsak ang presyon sa dugo
+Sakit sa dughan
+Murag gipuga ang dughan
+Sakit sa kaunuran
+Kaluya sa kaunuran
+Sakit sa lutahan
+Pagpanuko sa lutahan
+Pagdugo
+Pasa
+Gorgor
+Nadagdag ti init ti bagi
+Mapudot ti rikna
+Adda gorgor
+Gorgor
+Mapudot ti bagi
+Nalangat a temperatura ti bagi
+Kapuy
+Nakapuy unay
+Kapuy
+Malanglango
+awan ti pigsa
+Kinaluya
+Awan kusog
+Kinanalaka
+nalaka agsakit
+Bassit a pigsa
+Awan ti enerhiya
+Agkarayan ti lammin
+Agtururog
+Agkarayan
+Rigors
+karayan unay
+Agkurug
+Agpangis
+agasem
+Pangis
+Panagpangis
+diaphoresis
+Nabuyos iti pangis
+Panagkurang ti timbang
+Agpayat
+Agkurang ti bagi
+Agkurang kilo
+Cachexia
+napaypayat unay
+Panagdugang ti timbang
+Agdakkel ti bagi
+Agdakkel ti bagina
+Agtaba
+Agbusog
+agtaba unay
+Agbusog
+Katabaan
+Aglibun
+agkutkutibeng
+Nalaka ti ulu
+Dakkel ti alingagaw
+Kasla aglibun
+vertigo
+Agtarayan ti ulo
+Sakit ti ulu
+Migraine
+Agsakit ti ulu
+Kasla mabutbuteng ti ulu
+Cephalalgia 
+sakit ti ulu
+Masakit ti ulu
+Agpupukaw ti sakit ti ulu
+Kombulsyon
+Panagkurug unay
+sakit a panagkurug
+Atake
+Panag rigor ti bagi
+Awan kontrol ti panag-rigid
+Panagkuyog ti kaun-uran
+Awan kontrol nga agkurug ti bagi
+Epilepsia
+Kinaiddep
+awan rikna
+Parestesia
+Panawen ti rikna
+Awan rikna
+Agtusok-tusok a rikna
+Panaglipat
+Agsakit ti tiyan 
+agsapul ti agsuka
+Panagsuka
+Sakit ti tiyan
+Rigrigat
+pagtatae
+Disentiria
+Tibi
+Awan paggusto
+Pantal
+Katni
+Makati
+Hives 
+Urticaria
+Paltos
+Nalapnit a panit
+Namaga
+Agturong ti ginhawa
+Naigged a dughan
+Ubo
+Agsipol ti agginhawa
+Naigged a dughan
+Panagpalpitasyon
+Nalaka a palpitasyon
+Nabassit a palpitasyon
+Altapresion
+Nabassit ti presion
+Sakit ti dughan
+Sakit ti kaun-uran
+Kina-luya ti kaun-uran
+Kina-luya
+Sakit ti lutlutan
+Nabileg ti lutlutan
+Panagdugo
+Sugat ti sugat
+pannakapaay ti organo
+Panatad
+Dumakal a kaaldo
+Makadidiyak ako
+Mayadu ya vavu du katawan
+Kapagal
+Nakánay
+Kapuyan
+Kakulgul
+Kawananin di paviay
+Kapia
+Awri makayang
+Kumuyug
+Awri masingan di lasi
+Awri makayang mangana
+Kegdeg
+Mengyangyang
+Mangatal
+Inarayan
+Mangyed
+Pananagibe
+Pagbabawas tat kagarat
+Dumakal a lawas
+Umáyad a dumakél
+Mayvayat du lawas
+Linglingaw
+Lingaan
+Machakit do Ulo
+Pananakit nu Ulo
+Machakit su ulo ko
+Pallapalayaw
+Panagtanem nu Utek
+Pagkakamanhid
+Pagkalimot
+makalimot
+maymayhod
+Maknel
+machvayaw ko
+kalmey
+makarandam a mayvayaw ka ta tian mo
+Magsuka
+Mahapdi ya tiyan
+Mahalaw
+mabuwabuwa a dahsi
+Madkel a panlawas
+maychiddu a vahid
+Kaytil na aknan
+diri makakan
+nadngModel ang ganagana
+ma-imura so kakanen
+Magatel
+panubo sa kuday
+ilat sa kuday
+Magatel
+Lipwan
+Bahed
+Magtuklap a kuday
+Kabtatuka
+Mga bukól
+Buntog
+Kapáyaw ta ahén
+Makaya a makayayat
+Maparinat diddib
+Mangapugung
+Mananek
+Mangahap
+Uho
+Manlura
+Makayungyong
+Makaarüng awni nu manawa
+Awni hidi nu mayungyong
+Mahapmura du kukúb
+Madegdég du kukúb
+Marudemdumayus du kukúb
+Mabigat du kukúb
+Kunyukmeymey ta puso
+Mavesves ya puso
+Di pantay a kunyukmeymey ta puso
+mabilis ya kunyukmeymey ta puso
+Mahina ya daguldagul
+Kabawasan nu kadalas nu puso
+Mapiahak ya presion nu räha
+Haypertension
+Mapia pa du dios mahedchad su pressure
+Umungalaw du mahedchad su pressure
+Naitas a mahad su pressure
+Madidiay a mahad su pressure
+Kapipitta du kalamu
+Maphod dud kalamu
+Mamilig ya baruk
+Makaviduka ya baruk
+Maparinut du tayahen
+Pananakit nu vucay
+Madkel a vakes
+Magkel a uho
+Mahina a vakes
+Kapoyan da uviug
+Kawara da kakayahan da uviug
+Kapusan da uviug
+Mangdodoyadoy ya uviug
+Mahapdi ya kateknugan
+Pananakit du tulang
+Pangangalit du tulang
+Di mapya ab kaslekan du tulang
+Paninigas du tulang
+Makuri makasosoyo du tulang
+Di makasosoyo du tulang
+Kagutugut du tulang
+Mahapanaw
+pagpahapana du rahay
+Kapipiya du rahay
+Malañalña
+Katalbo
+Pakatay tu vuhus nu katawan

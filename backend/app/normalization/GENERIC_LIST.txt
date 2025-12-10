@@ -1,0 +1,126 @@
+Acetylcysteine
+Acyclovir
+Albuterol
+Albendazole
+Alendronate
+Allopurinol
+Aluminum Hydroxide
+Amlodipine
+Amoxicillin
+Amphotericin B
+Atenolol
+Atorvastatin
+Azithromycin
+Baclofen
+Beclomethasone
+Benzonatate
+Betahistine
+Betamethasone
+Bisoprolol
+Bromhexine
+Budesonide
+Buprenorphine
+Bupropion
+Buscopan (Hyoscine Butylbromide)
+Calcium Carbonate
+Captopril
+Carbamazepine
+Carvedilol
+Cefalexin
+Cefixime
+Ceftriaxone
+Cefuroxime
+Cetirizine
+Chloramphenicol
+Chloroquine
+Ciprofloxacin
+Clarithromycin
+Clindamycin
+Clonazepam
+Clopidogrel
+Cloxacillin
+Co-amoxiclav
+Co-trimoxazole
+Colchicine
+Cyanocobalamin (Vitamin B12)
+Dexamethasone
+Diclofenac
+Dicycloverine
+Diphenhydramine
+Doxycycline
+Domperidone
+Enalapril
+Erythromycin
+Esomeprazole
+Estradiol
+Ferrous Sulfate
+Fluconazole
+Fluoxetine
+Fluticasone
+Folic Acid
+Furosemide
+Gabapentin
+Gliclazide
+Glimepiride
+Hydrochlorothiazide
+Hydrocortisone
+Hyoscine N-butylbromide
+Ibuprofen
+Immunoglobulin
+Insulin (Regular)
+Insulin (NPH)
+Isoniazid
+Isosorbide Dinitrate
+Isosorbide Mononitrate
+Ketoconazole
+Lansoprazole
+Loperamide
+Loratadine
+Losartan
+Mebendazole
+Meclizine
+Metformin
+Methyldopa
+Metoprolol
+Metronidazole
+Mometasone
+Montelukast
+Mupirocin
+Naproxen
+Nifedipine
+Nitroglycerin
+Ofloxacin
+Omeprazole
+Ondansetron
+Oseltamivir
+Paracetamol
+Phenylephrine
+Prednisone
+Pregabalin
+Propranolol
+Pyridoxine (Vitamin B6)
+Ranitidine
+Rifampicin
+Rosuvastatin
+Salbutamol
+Salmeterol
+Sertraline
+Sildenafil
+Simvastatin
+Sitagliptin
+Spironolactone
+Telmisartan
+Terbinafine
+Tetanus Toxoid
+Thiamine (Vitamin B1)
+Tolfenamic Acid
+Tranexamic Acid
+Tramadol
+Triamcinolone
+Ursodeoxycholic Acid
+Valacyclovir
+Valsartan
+Vitamin C (Ascorbic Acid)
+Vitamin D3 (Cholecalciferol)
+Warfarin
+Zinc Sulfate
