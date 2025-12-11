@@ -7,15 +7,13 @@ import 'package:intl/intl.dart';
 import '../../data/providers.dart';
 
 class SymptomsActivityPanel extends ConsumerStatefulWidget {
-  final String timeframe;
-  final String people;
+  final String timeframe; // kept for compatibility, but not used now
   final String medicine;
   final double? height;
 
   const SymptomsActivityPanel({
     super.key,
     required this.timeframe,
-    required this.people,
     required this.medicine,
     this.height,
   });
@@ -26,7 +24,9 @@ class SymptomsActivityPanel extends ConsumerStatefulWidget {
 }
 
 class _SymptomsActivityPanelState extends ConsumerState<SymptomsActivityPanel> {
-  SymptomsGrouping _grouping = SymptomsGrouping.month;
+  // Default view: YEARLY
+  SymptomsGrouping _grouping = SymptomsGrouping.year;
+  int? _selectedYear; // used when grouping == month
 
   @override
   Widget build(BuildContext context) {
@@ -44,7 +44,66 @@ class _SymptomsActivityPanelState extends ConsumerState<SymptomsActivityPanel> {
           loading: () => const Center(child: CircularProgressIndicator()),
           error: (e, _) => _ErrorState(message: e.toString()),
           data: (raw) {
-            final buckets = _normalizeBuckets(raw);
+            // We expect a map: { 'yearly': [...], 'monthly': [...] }
+            final yearlyRaw = raw['yearly'];
+            final monthlyRaw = raw['monthly'];
+
+            final yearlyBuckets = _normalizeBuckets(yearlyRaw);
+            final monthlyBucketsAll = _normalizeBuckets(monthlyRaw);
+
+            if (yearlyBuckets.isEmpty && monthlyBucketsAll.isEmpty) {
+              return const Center(
+                child: Text('No activity for the selected filters.'),
+              );
+            }
+
+            // ---- Years list (for dropdown in Monthly view) ----
+            // Only keep years that actually have >0 total reports
+            final yearsSet = <int>{};
+
+            for (final b in yearlyBuckets) {
+              if (b.total > 0) yearsSet.add(b.labelStart.year);
+            }
+            for (final b in monthlyBucketsAll) {
+              if (b.total > 0) yearsSet.add(b.labelStart.year);
+            }
+
+            final years = yearsSet.toList()..sort();
+
+            int effectiveYear;
+            if (_selectedYear != null && years.contains(_selectedYear)) {
+              effectiveYear = _selectedYear!;
+            } else if (years.isNotEmpty) {
+              effectiveYear = years.last; // latest year with data
+            } else {
+              // fallback – shouldn't really happen because we filtered by total>0
+              effectiveYear = DateTime.now().year;
+            }
+
+            // ---- Choose buckets depending on grouping ----
+            List<_Bucket> buckets;
+
+            if (_grouping == SymptomsGrouping.year) {
+              // One bar per YEAR – but only years that have data
+              buckets = yearlyBuckets.where((b) => b.total > 0).toList();
+            } else {
+              // Monthly view: 12 months of the selected year
+              final byMonth = <int, int>{};
+              for (final b in monthlyBucketsAll) {
+                if (b.labelStart.year == effectiveYear) {
+                  byMonth[b.labelStart.month] =
+                      (byMonth[b.labelStart.month] ?? 0) + b.total;
+                }
+              }
+
+              final temp = <_Bucket>[];
+              for (var m = 1; m <= 12; m++) {
+                final dt = DateTime.utc(effectiveYear, m, 1);
+                temp.add(_Bucket(dt, byMonth[m] ?? 0));
+              }
+              buckets = temp;
+            }
+
             if (buckets.isEmpty) {
               return const Center(
                 child: Text('No activity for the selected filters.'),
@@ -58,8 +117,8 @@ class _SymptomsActivityPanelState extends ConsumerState<SymptomsActivityPanel> {
             final leftInterval =
                 ((ghost / 4).clamp(1, ghost.toDouble())).toDouble();
 
+            final dfYear = DateFormat('yyyy');
             final dfMonth = DateFormat('MMM');
-            final dfWeek = DateFormat('MM/dd');
 
             final groups = <BarChartGroupData>[
               for (var i = 0; i < buckets.length; i++)
@@ -67,7 +126,7 @@ class _SymptomsActivityPanelState extends ConsumerState<SymptomsActivityPanel> {
                   x: i,
                   barsSpace: 4,
                   barRods: [
-                    // background/ghost bar
+                    // background bar
                     BarChartRodData(
                       toY: ghost,
                       width: 14,
@@ -85,7 +144,7 @@ class _SymptomsActivityPanelState extends ConsumerState<SymptomsActivityPanel> {
                 ),
             ];
 
-            return Padding(
+            final chart = Padding(
               padding: const EdgeInsets.only(
                 top: 12,
                 right: 8,
@@ -98,32 +157,20 @@ class _SymptomsActivityPanelState extends ConsumerState<SymptomsActivityPanel> {
                   gridData: FlGridData(show: false),
                   borderData: FlBorderData(show: false),
                   barGroups: groups,
-
-                  // >>> CLEANER TOOLTIP STYLE <<<
                   barTouchData: BarTouchData(
                     enabled: true,
                     touchTooltipData: BarTouchTooltipData(
-                      // New API: use getTooltipColor instead of tooltipBgColor
                       getTooltipColor:
-                          (group) =>
-                              Theme.of(
-                                context,
-                              ).colorScheme.surface, // clean, matches card
-
+                          (group) => Theme.of(context).colorScheme.surface,
                       tooltipRoundedRadius: 8,
                       tooltipPadding: const EdgeInsets.symmetric(
                         horizontal: 8,
                         vertical: 4,
                       ),
                       tooltipMargin: 8,
-
                       getTooltipItem: (group, groupIndex, rod, rodIndex) {
-                        // Only show for the foreground bar (index 1),
-                        // skip the grey ghost/background bar (index 0)
-                        if (rodIndex != 1) return null;
-
+                        if (rodIndex != 1) return null; // skip ghost bar
                         final value = buckets[groupIndex].total;
-
                         final textStyle =
                             Theme.of(context).textTheme.bodySmall?.copyWith(
                               fontWeight: FontWeight.w600,
@@ -132,14 +179,10 @@ class _SymptomsActivityPanelState extends ConsumerState<SymptomsActivityPanel> {
                               fontSize: 11,
                               fontWeight: FontWeight.w600,
                             );
-
-                        // Simple number in a small pill
                         return BarTooltipItem(value.toString(), textStyle);
                       },
                     ),
                   ),
-
-                  // <<< END TOOLTIP CONFIG <<<
                   titlesData: FlTitlesData(
                     leftTitles: AxisTitles(
                       sideTitles: SideTitles(
@@ -163,7 +206,7 @@ class _SymptomsActivityPanelState extends ConsumerState<SymptomsActivityPanel> {
                       sideTitles: SideTitles(
                         showTitles: true,
                         interval: 1,
-                        reservedSize: 20,
+                        reservedSize: 22,
                         getTitlesWidget: (v, _) {
                           final i = v.toInt();
                           if (i < 0 || i >= buckets.length) {
@@ -171,9 +214,9 @@ class _SymptomsActivityPanelState extends ConsumerState<SymptomsActivityPanel> {
                           }
                           final d = buckets[i].labelStart;
                           final label =
-                              _grouping == SymptomsGrouping.month
-                                  ? dfMonth.format(d)
-                                  : dfWeek.format(d);
+                              _grouping == SymptomsGrouping.year
+                                  ? dfYear.format(d)
+                                  : dfMonth.format(d);
                           return Padding(
                             padding: const EdgeInsets.only(top: 6),
                             child: Text(
@@ -187,6 +230,35 @@ class _SymptomsActivityPanelState extends ConsumerState<SymptomsActivityPanel> {
                   ),
                 ),
               ),
+            );
+
+            // Wrap chart with optional YEAR selector for monthly view
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (_grouping == SymptomsGrouping.month && years.isNotEmpty)
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: DropdownButton<int>(
+                      value: effectiveYear,
+                      underline: const SizedBox.shrink(),
+                      onChanged: (y) {
+                        if (y == null) return;
+                        setState(() => _selectedYear = y);
+                      },
+                      items:
+                          years
+                              .map(
+                                (y) => DropdownMenuItem<int>(
+                                  value: y,
+                                  child: Text(y.toString()),
+                                ),
+                              )
+                              .toList(),
+                    ),
+                  ),
+                Expanded(child: chart),
+              ],
             );
           },
         ),
@@ -437,13 +509,13 @@ class _GroupingButton extends StatelessWidget {
       onSelected: onChanged,
       itemBuilder:
           (ctx) => const [
+            PopupMenuItem(value: SymptomsGrouping.year, child: Text('Year')),
             PopupMenuItem(value: SymptomsGrouping.month, child: Text('Month')),
-            PopupMenuItem(value: SymptomsGrouping.week, child: Text('Week')),
           ],
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(value == SymptomsGrouping.month ? 'Month' : 'Week'),
+          Text(value == SymptomsGrouping.year ? 'Year' : 'Month'),
           const SizedBox(width: 4),
           const Icon(Icons.keyboard_arrow_down_rounded),
         ],

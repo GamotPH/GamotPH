@@ -1,7 +1,10 @@
 // lib/data/providers.dart
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart'; // @immutable
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' as supa;
+import 'package:http/http.dart' as http;
 
 // Use LatLng from latlong2…
 import 'package:latlong2/latlong.dart' show LatLng;
@@ -10,6 +13,7 @@ import 'package:flutter_map/flutter_map.dart' show LatLngBounds;
 
 import 'analytics_repository.dart';
 import 'psgc_api.dart';
+import 'backend_config.dart';
 
 /* ------------------------------ Repositories ------------------------------ */
 
@@ -25,10 +29,8 @@ final genericNameListProvider = FutureProvider.autoDispose
       final list = await repo.distinctGenericNames(
         brandName: (brandName == null || brandName == 'ALL') ? null : brandName,
       );
-      return [
-        'ALL',
-        ...{...list},
-      ];
+      // repo already dedupes & sorts; just prefix ALL
+      return ['ALL', ...list];
     });
 
 final brandNameListProvider = FutureProvider.autoDispose
@@ -38,23 +40,47 @@ final brandNameListProvider = FutureProvider.autoDispose
         genericName:
             (genericName == null || genericName == 'ALL') ? null : genericName,
       );
-      return [
-        'ALL',
-        ...{...list},
-      ];
+      return ['ALL', ...list];
     });
 
 /* ------------------------------ Global filters ---------------------------- */
 
 final filterProvider = StateProvider<DashboardFilter>((ref) {
-  final now = DateTime.now().toUtc();
-  final start = DateTime.utc(now.year, 1, 1); // default: YTD
-  return DashboardFilter(start: start, end: now.add(const Duration(days: 1)));
+  final now = DateTime.now();
+  // All-time: start far in the past, end = tomorrow
+  final start = DateTime(2000, 1, 1);
+  final end = now.add(const Duration(days: 1));
+  return DashboardFilter(start: start, end: end);
 });
+
+// ---------------------------
+// Dashboard Filter Updater
+// ---------------------------
+/// The dashboard is always all-time; the only dynamic filter we apply
+/// is by medicine.  Passing "All" or null clears the medicine filter.
+void updateDashboardFilter(WidgetRef ref, {required String? medicine}) {
+  final now = DateTime.now();
+  final start = DateTime(2000, 1, 1);
+  final end = now.add(const Duration(days: 1));
+
+  String? normalizeAll(String? v) {
+    final t = (v ?? '').trim();
+    if (t.isEmpty) return null;
+    if (t.toLowerCase() == 'all') return null; // null = no filter
+    return t;
+  }
+
+  ref.read(filterProvider.notifier).state = DashboardFilter(
+    start: start,
+    end: end,
+    personId: null, // region / person filter removed
+    medicine: normalizeAll(medicine),
+  );
+}
 
 /* ------------------------------ UI state ---------------------------------- */
 
-enum SymptomsGrouping { month, week }
+enum SymptomsGrouping { year, month }
 
 final symptomsGroupingProvider = StateProvider<SymptomsGrouping>(
   (_) => SymptomsGrouping.month,
@@ -130,14 +156,23 @@ class ReportLogItem {
 
 /* ------------------------------ Data providers ---------------------------- */
 
-final keyMetricsProvider = FutureProvider.autoDispose((ref) async {
-  final f = ref.watch(filterProvider);
-  return ref.watch(repoProvider).keyMetrics(f);
+// Key Metrics – return the KeyMetrics model from the repository
+final keyMetricsProvider = FutureProvider.autoDispose<KeyMetrics>((ref) async {
+  final repo = ref.watch(repoProvider); // <-- use repoProvider
+  final filter = ref.watch(filterProvider); // <-- current dashboard filter
+  return repo.keyMetrics(filter); // <-- returns KeyMetrics
 });
 
-final symptomsProvider = FutureProvider.autoDispose((ref) async {
+final symptomsProvider = FutureProvider.autoDispose<Map<String, dynamic>>((
+  ref,
+) async {
   final f = ref.watch(filterProvider);
-  return ref.watch(repoProvider).symptomsMonthly(f);
+  final repo = ref.watch(repoProvider);
+
+  final monthly = await repo.symptomsMonthly(f);
+  final yearly = await repo.symptomsYearly(f);
+
+  return {'yearly': yearly, 'monthly': monthly};
 });
 
 final wordCloudProvider = FutureProvider.autoDispose<List<WordItem>>((
@@ -222,7 +257,6 @@ final geoDistributionProvider = FutureProvider.autoDispose<List<GeoRow>>((
 });
 
 /// 🔹 Report logs (live ADR list, role-aware, no SQL join)
-/// 🔹 Report logs (live ADR list, role-aware, no SQL join)
 final reportLogsProvider = FutureProvider.autoDispose<List<ReportLogItem>>((
   ref,
 ) async {
@@ -239,7 +273,6 @@ final reportLogsProvider = FutureProvider.autoDispose<List<ReportLogItem>>((
 
   /* ───────── 1) Fetch ADR_Reports rows in time range ───────── */
 
-  // 👇 IMPORTANT: use the real column names from your ADR_Reports table
   final rawAdrs =
       await client
               .from('ADR_Reports')
@@ -468,14 +501,65 @@ final clinicalManagementProvider = FutureProvider.autoDispose<ClinicalSeries>((
   return ClinicalSeries(labels, values);
 });
 
+/// 🔹 NEW: ADR pie data from backend-normalized reactions
 final adverseReactionsProvider = FutureProvider.autoDispose<PieSeries>((
   ref,
 ) async {
   final f = ref.watch(filterProvider);
-  final counts = await ref.watch(repoProvider).adverseReactionsCounts(f);
+  final repo = ref.watch(repoProvider);
 
+  // 1) Get raw counts from Supabase (reactionDescription etc.)
+  final rawCounts = await repo.adverseReactionsCounts(f);
+
+  if (rawCounts.isEmpty) {
+    return const PieSeries(labels: [], values: []);
+  }
+
+  // 2) Build payload for backend normalizer
+  final payloadItems =
+      rawCounts.entries.map((e) => {'text': e.key, 'count': e.value}).toList();
+
+  final uri = Uri.parse(
+    '${BackendConfig.baseUrl}/api/v1/analytics/normalize-reactions',
+  );
+
+  Map<String, int> normalizedCounts = {};
+
+  try {
+    final resp = await http.post(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'items': payloadItems}),
+    );
+
+    if (resp.statusCode == 200) {
+      final decoded = jsonDecode(resp.body) as Map<String, dynamic>;
+      final items = (decoded['items'] as List<dynamic>? ?? []);
+
+      for (final item in items) {
+        final m = item as Map<String, dynamic>;
+        final label = (m['label'] ?? '').toString().trim();
+        final cnt = (m['count'] as num?)?.toInt() ?? 0;
+        if (label.isEmpty || cnt <= 0) continue;
+        normalizedCounts[label] = (normalizedCounts[label] ?? 0) + cnt;
+      }
+    } else {
+      // Backend failed → fall back to rawCounts
+      normalizedCounts = Map<String, int>.from(rawCounts);
+    }
+  } catch (_) {
+    // Network / JSON error → fall back to rawCounts
+    normalizedCounts = Map<String, int>.from(rawCounts);
+  }
+
+  if (normalizedCounts.isEmpty) {
+    return const PieSeries(labels: [], values: []);
+  }
+
+  // 3) Build "Top N + Other" for the pie chart
   final entries =
-      counts.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
+      normalizedCounts.entries.toList()
+        ..sort((a, b) => b.value.compareTo(a.value));
 
   const topN = 5;
   final top = entries.take(topN).toList();
@@ -493,13 +577,10 @@ final adverseReactionsProvider = FutureProvider.autoDispose<PieSeries>((
     labels.add(e.key);
     values.add(e.value.toDouble());
   }
+
   if (otherSum > 0) {
     labels.add('Other');
     values.add(otherSum.toDouble());
-  }
-
-  if (labels.isEmpty) {
-    return const PieSeries(labels: [], values: []);
   }
 
   return PieSeries(labels: labels, values: values);

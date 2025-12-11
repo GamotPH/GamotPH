@@ -1,3 +1,5 @@
+// lib/screens/trends/trends_map_page.dart  (or your current path)
+
 import 'dart:math' as math;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
@@ -41,7 +43,7 @@ class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
   @override
   void initState() {
     super.initState();
-    // Don't move the camera here; do it in onMapReady once the map has a real size.
+    // Camera is aligned later in _updateBoundsAndPan once map is ready.
   }
 
   @override
@@ -55,17 +57,35 @@ class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
     final String? areaCode = _regionCode;
 
     // Drug filters
-    final genericsAsync = ref.watch(genericNameListProvider(_selectedBrand));
-    final brandsAsync = ref.watch(brandNameListProvider(_selectedGeneric));
 
-    // Trends query (server already receives areaCode; we also guard on the client with bbox)
+    String? normalizedBrand =
+        _selectedBrand == 'ALL' ? null : _selectedBrand.trim();
+
+    String? normalizedGeneric =
+        _selectedGeneric == 'ALL' ? null : _selectedGeneric.trim();
+
+    final genericsAsync = ref.watch(genericNameListProvider(normalizedBrand));
+
+    final brandsAsync = ref.watch(brandNameListProvider(normalizedGeneric));
+
+    // Trends query
+    final repo = ref.read(repoProvider);
+
+    // Convert to canonical form that backend expects
+    final canonBrand =
+        (_selectedBrand == 'ALL') ? null : repo.canonDrug(_selectedBrand);
+
+    final canonGeneric =
+        (_selectedGeneric == 'ALL') ? null : repo.canonDrug(_selectedGeneric);
+
     final params = TrendsParams(
       areaCode: areaCode,
       start: _range.start.toUtc(),
       end: _range.end.toUtc(),
-      genericName: (_selectedGeneric == 'ALL') ? null : _selectedGeneric,
-      brandName: (_selectedBrand == 'ALL') ? null : _selectedBrand,
+      brandName: canonBrand,
+      genericName: canonGeneric,
     );
+
     final trendsAsync = ref.watch(trendsProvider(params));
 
     return Scaffold(
@@ -191,6 +211,7 @@ class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
                               loading: () => const _LoadingStrip(),
                               error: (e, _) => _Err('generics', e),
                               data: (list) {
+                                // Build clean sorted list + ALL
                                 final options =
                                     <String>{...list, 'ALL'}.toList()
                                       ..sort((a, b) {
@@ -200,12 +221,14 @@ class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
                                           b.toLowerCase(),
                                         );
                                       });
-                                final value =
-                                    options.contains(_selectedGeneric)
-                                        ? _selectedGeneric
-                                        : 'ALL';
+
+                                // 🔥 Clean stale/invalid selections
+                                if (!options.contains(_selectedGeneric)) {
+                                  setState(() => _selectedGeneric = 'ALL');
+                                }
+
                                 return DropdownButtonFormField<String>(
-                                  value: value,
+                                  value: _selectedGeneric,
                                   isExpanded: true,
                                   items:
                                       options
@@ -216,10 +239,11 @@ class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
                                             ),
                                           )
                                           .toList(),
-                                  onChanged:
-                                      (v) => setState(
-                                        () => _selectedGeneric = v ?? 'ALL',
-                                      ),
+                                  onChanged: (v) {
+                                    setState(
+                                      () => _selectedGeneric = v ?? 'ALL',
+                                    );
+                                  },
                                   decoration: const InputDecoration(
                                     border: InputBorder.none,
                                   ),
@@ -239,6 +263,7 @@ class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
                               loading: () => const _LoadingStrip(),
                               error: (e, _) => _Err('brands', e),
                               data: (list) {
+                                // Build clean sorted list + ALL
                                 final options =
                                     <String>{...list, 'ALL'}.toList()
                                       ..sort((a, b) {
@@ -248,12 +273,14 @@ class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
                                           b.toLowerCase(),
                                         );
                                       });
-                                final value =
-                                    options.contains(_selectedBrand)
-                                        ? _selectedBrand
-                                        : 'ALL';
+
+                                // 🔥 Clean stale/invalid selections
+                                if (!options.contains(_selectedBrand)) {
+                                  setState(() => _selectedBrand = 'ALL');
+                                }
+
                                 return DropdownButtonFormField<String>(
-                                  value: value,
+                                  value: _selectedBrand,
                                   isExpanded: true,
                                   items:
                                       options
@@ -264,10 +291,9 @@ class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
                                             ),
                                           )
                                           .toList(),
-                                  onChanged:
-                                      (v) => setState(
-                                        () => _selectedBrand = v ?? 'ALL',
-                                      ),
+                                  onChanged: (v) {
+                                    setState(() => _selectedBrand = v ?? 'ALL');
+                                  },
                                   decoration: const InputDecoration(
                                     border: InputBorder.none,
                                   ),
@@ -303,7 +329,22 @@ class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
                                     ),
                                   ),
                               data: (res) {
-                                final list = res.topEffects;
+                                // Filter out Unknown / Unspecified
+                                final raw = res.topEffects;
+                                final list =
+                                    raw.where((t) {
+                                      final d = t.drug.trim().toLowerCase();
+                                      final e = t.effect.trim().toLowerCase();
+                                      if (d.isEmpty || d == 'unknown')
+                                        return false;
+                                      if (e.isEmpty ||
+                                          e == 'unknown' ||
+                                          e == 'unspecified') {
+                                        return false;
+                                      }
+                                      return true;
+                                    }).toList();
+
                                 if (list.isEmpty) {
                                   return const Padding(
                                     padding: EdgeInsets.all(16),
@@ -312,6 +353,7 @@ class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
                                     ),
                                   );
                                 }
+
                                 return SizedBox(
                                   height: 320,
                                   child: ListView.separated(
@@ -322,12 +364,8 @@ class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
                                     itemBuilder: (context, i) {
                                       final t = list[i];
                                       return _EffectTile(
-                                        drug:
-                                            t.drug.isEmpty ? 'Unknown' : t.drug,
-                                        effect:
-                                            t.effect.isEmpty
-                                                ? 'Unspecified'
-                                                : t.effect,
+                                        drug: t.drug,
+                                        effect: t.effect,
                                         cases: t.cases,
                                       );
                                     },
@@ -390,7 +428,7 @@ class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
                             initialZoom: _initialZoom,
                             onMapReady: () {
                               _mapReady = true;
-                              _updateBoundsAndPan(); // align camera to ALL or region bbox
+                              _updateBoundsAndPan();
                             },
                             onMapEvent: (evt) {
                               final z = evt.camera.zoom;
@@ -404,19 +442,34 @@ class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
                               userAgentPackageName: 'com.gamotph.app',
                             ),
 
-                            // NOTE: We intentionally DO NOT draw the blue bbox rectangle anymore.
-
                             // Heat circles (strictly inside bbox when a specific area is chosen)
                             trendsAsync.maybeWhen(
                               data: (res) {
                                 final bool showingAll = _regionCode == null;
-                                // If a specific area is selected but we don't have its bbox yet,
-                                // hide the circles to avoid leaking markers from the previous area.
                                 if (!showingAll && _selectedBounds == null) {
+                                  // Area selected but bbox not ready yet -> hide circles briefly
                                   return const SizedBox.shrink();
                                 }
                                 return CircleLayer(
                                   circles: _buildHeatCirclesFiltered(
+                                    res.clusters,
+                                    bounds: _selectedBounds,
+                                    zoom: _zoom,
+                                  ),
+                                );
+                              },
+                              orElse: () => const SizedBox.shrink(),
+                            ),
+
+                            // Transparent markers on top, used only for hover tooltips
+                            trendsAsync.maybeWhen(
+                              data: (res) {
+                                final bool showingAll = _regionCode == null;
+                                if (!showingAll && _selectedBounds == null) {
+                                  return const SizedBox.shrink();
+                                }
+                                return MarkerLayer(
+                                  markers: _buildHeatMarkersFiltered(
                                     res.clusters,
                                     bounds: _selectedBounds,
                                     zoom: _zoom,
@@ -469,15 +522,14 @@ class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
 
   // ---------------------- bounds + camera helpers ----------------------
   Future<void> _updateBoundsAndPan() async {
-    if (!_mapReady) return; // avoid moving before map layout is ready
+    if (!_mapReady) return;
 
     final String? code = _regionCode;
 
-    // If ALL is selected, clear bounds and zoom out to whole PH
+    // ALL regions -> zoom out to PH
     if (code == null) {
       setState(() => _selectedBounds = null);
 
-      // Move after current frame to be extra safe
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         _mapController.move(const LatLng(12.8797, 121.7740), 6.0);
@@ -491,14 +543,12 @@ class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
     if (!mounted) return;
 
     if (bbox == null) {
-      // Important: clear bounds when the lookup fails so we don't reuse an old bbox.
       setState(() => _selectedBounds = null);
       return;
     }
 
     setState(() => _selectedBounds = bbox);
 
-    // Fit camera to bbox
     _mapController.fitCamera(
       CameraFit.bounds(
         bounds: bbox,
@@ -512,8 +562,31 @@ class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
     );
   }
 
+  // 🔽 ADD THIS BELOW THE CLASS — BUT BEFORE _buildHeatMarkersFiltered()
+  String _buildTooltip(TrendCluster c) {
+    final buffer = StringBuffer();
+
+    buffer.writeln('Total reports: ${c.count}');
+
+    if (c.effectCounts.isNotEmpty) {
+      buffer.writeln('\nTop symptoms:');
+
+      final sorted =
+          c.effectCounts.entries.toList()
+            ..sort((a, b) => b.value.compareTo(a.value));
+
+      for (final e in sorted.take(3)) {
+        buffer.writeln('• ${e.key} (${e.value})');
+      }
+    } else {
+      buffer.writeln('\nNo symptom data.');
+    }
+
+    return buffer.toString();
+  }
+
   // --------------------------- heat helpers ---------------------------
-  // Keep circles visible at any zoom (pixel radius), and clamp to selected bounds.
+  // Keep circles visible at any zoom (pixel radius), clamp to selected bounds.
   List<CircleMarker> _buildHeatCirclesFiltered(
     List<TrendCluster> clusters, {
     LatLngBounds? bounds,
@@ -540,7 +613,7 @@ class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
       items.add(
         CircleMarker(
           point: c.center,
-          useRadiusInMeter: false, // pixel-based so it scales with zoom
+          useRadiusInMeter: false,
           radius: px,
           color: color.withValues(alpha: 0.55),
           borderColor: color.withValues(alpha: 0.75),
@@ -551,6 +624,63 @@ class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
     return items;
   }
 
+  // Same filtering & color logic as circles, but as Markers so we can show tooltips.
+  List<Marker> _buildHeatMarkersFiltered(
+    List<TrendCluster> clusters, {
+    LatLngBounds? bounds,
+    required double zoom,
+  }) {
+    if (clusters.isEmpty) return const <Marker>[];
+
+    int minC = clusters.first.count;
+    int maxC = clusters.first.count;
+    for (final c in clusters) {
+      if (c.count < minC) minC = c.count;
+      if (c.count > maxC) maxC = c.count;
+    }
+    final denom = (maxC - minC) == 0 ? 1.0 : (maxC - minC).toDouble();
+
+    final markers = <Marker>[];
+    for (final c in clusters) {
+      if (bounds != null && !_insideBounds(bounds, c.center)) continue;
+
+      final t = (c.count - minC) / denom;
+      final color = _heatColor(t);
+      final px = _radiusForZoom(zoom, c.count);
+
+      final tooltipText = _buildTooltip(c);
+
+      markers.add(
+        Marker(
+          point: c.center,
+          width: px * 2,
+          height: px * 2,
+          child: Tooltip(
+            message: tooltipText,
+            preferBelow: false,
+            waitDuration: const Duration(milliseconds: 400),
+            decoration: BoxDecoration(
+              color: Colors.black87,
+              borderRadius: BorderRadius.circular(6),
+            ),
+            textStyle: const TextStyle(color: Colors.white, fontSize: 12),
+            child: Container(
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: color.withValues(alpha: 0.55),
+                border: Border.all(
+                  color: color.withValues(alpha: 0.75),
+                  width: 1.8,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+    return markers;
+  }
+
   bool _insideBounds(LatLngBounds b, LatLng p) {
     return p.latitude >= b.south &&
         p.latitude <= b.north &&
@@ -558,11 +688,11 @@ class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
         p.longitude <= b.east;
   }
 
-  // zoom -> pixel radius (smooth growth between z=6..14)
+  // zoom -> pixel radius (smooth growth between z=6..14, scaled by count)
   double _radiusForZoom(double zoom, int count) {
     final t = ((zoom - 6.0) / 8.0).clamp(0.0, 1.0); // 6..14 -> 0..1
     final base = 8.0 + (24.0 * t); // 8..32 px
-    final bonus = (math.log(count + 1) / math.ln10) * 2.0; // small emphasis
+    final bonus = (math.log(count + 1) / math.ln10) * 2.0;
     return base + bonus;
   }
 
@@ -618,7 +748,6 @@ class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
     if (current == null) return;
     final exists = itemsCodes.any((c) => c == current);
     if (!exists) {
-      // Clear *after* this frame to avoid setState during build.
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) clear();
       });

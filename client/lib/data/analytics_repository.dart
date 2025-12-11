@@ -5,6 +5,9 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:latlong2/latlong.dart' show LatLng;
 // …but LatLngBounds is from flutter_map (NOT latlong2)
 import 'package:flutter_map/flutter_map.dart' show LatLngBounds;
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import 'backend_config.dart';
 
 /* ───────── Filters ───────── */
 
@@ -71,7 +74,7 @@ class MonthlyCount {
   MonthlyCount({required this.month, required this.count});
 }
 
-/* ───────── Models (NEW for Trends Map) ───────── */
+/* ───────── Models (for Trends Map) ───────── */
 
 class TrendPoint {
   final double lat, lng;
@@ -91,10 +94,13 @@ class TrendCluster {
   final LatLng center;
   final int count;
   final String brandName; // used for legend/color
+  final Map<String, int> effectCounts; // side-effect counts inside this cluster
+
   TrendCluster({
     required this.center,
     required this.count,
     required this.brandName,
+    this.effectCounts = const {},
   });
 }
 
@@ -154,8 +160,6 @@ class AnalyticsRepository {
 
   static const _tblReports = 'ADR_Reports';
   static const _colCreatedAt = 'created_at';
-  static const _colPersonId = 'person_id';
-  static const _colDrugName = 'drug_name';
 
   String _iso(DateTime dt) => dt.toUtc().toIso8601String();
 
@@ -175,77 +179,357 @@ class AnalyticsRepository {
     return 0;
   }
 
-  double _toDouble(dynamic v) {
-    if (v is double) return v;
-    if (v is num) return v.toDouble();
-    if (v is String) return double.tryParse(v) ?? 0.0;
-    return 0.0;
+  /// Canonical form for medicine names:
+  /// - lowercased
+  /// - remove spaces and punctuation
+  ///   e.g. "Alaxan Fr", "ALAXAN-FR", "AlaxanFr" -> "alaxanfr"
+  String _canonDrugName(String? s) {
+    if (s == null) return '';
+    final t = s.trim().toLowerCase();
+    if (t.isEmpty) return '';
+    return t.replaceAll(RegExp(r'[^a-z0-9]+'), '');
   }
 
-  /* ───────── NEW: Medicines lookups (for dropdowns) ───────── */
+  /// Public wrapper so UI can canonicalize drug names the same way backend does.
+  String canonDrug(String? s) => _canonDrugName(s);
 
-  /// Distinct GENERIC names (from Medicines), optionally narrowed by brandName
+  /// Normalize a drug name for dropdowns:
+  /// - trims
+  /// - removes weird punctuation
+  /// - collapses spaces
+  /// - Title Case (Paracetamol, Amoxicillin, Bioflu Forte)
+  String _normalizeDrugName(String raw) {
+    var s = raw.trim();
+    if (s.isEmpty) return '';
+
+    // Remove non-alphanumeric characters (keep spaces)
+    s = s.replaceAll(RegExp(r'[^A-Za-z0-9\s]'), ' ');
+    // Collapse multiple spaces
+    s = s.replaceAll(RegExp(r'\s+'), ' ');
+    s = s.toLowerCase();
+
+    final parts = s.split(' ');
+    final out = <String>[];
+    for (final p in parts) {
+      if (p.isEmpty) continue;
+      out.add(p[0].toUpperCase() + p.substring(1));
+    }
+    return out.join(' ').trim();
+  }
+
+  /// Filter out junk values for brand / generic names
+  bool _isJunkDrugName(String? value) {
+    if (value == null) return true;
+    final t = value.trim();
+    if (t.isEmpty) return true;
+
+    final lower = t.toLowerCase();
+
+    // obvious junk / unknown markers
+    if (lower == 'unknown' ||
+        lower == 'n/a' ||
+        lower == 'na' ||
+        lower == 'none' ||
+        lower == 'nil' ||
+        lower == '-') {
+      return true;
+    }
+
+    // very short things like "bb"
+    if (lower.length < 3) return true;
+
+    // purely numeric
+    if (RegExp(r'^\d+$').hasMatch(lower)) return true;
+
+    return false;
+  }
+  // ---------------------- NORMALIZATION HELPERS ----------------------
+
+  String _canonDrug(String s) {
+    return s.trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '');
+  }
+
+  bool _isJunkDrug(String s) {
+    final lower = s.trim().toLowerCase();
+    if (lower.isEmpty) return true;
+    if (lower.length <= 2) return true; // removes "bb", "cc", etc.
+    if (RegExp(r'^\d+$').hasMatch(lower)) return true; // numbers only
+    if ([
+      'unknown',
+      'unspecified',
+      'n/a',
+      'na',
+      'none',
+      'nil',
+      'empty',
+      'other',
+      'test',
+    ].contains(lower))
+      return true;
+
+    return false;
+  }
+
+  String? _normalizeDrugDisplay(String? raw) {
+    if (raw == null) return null;
+    var t = raw.trim();
+    if (_isJunkDrug(t)) return null;
+
+    // Remove junk characters
+    t = t.replaceAll(RegExp(r'[^A-Za-z0-9\s]'), ' ');
+    t = t.replaceAll(RegExp(r'\s+'), ' ');
+    if (t.trim().isEmpty) return null;
+
+    // Title Case
+    return t
+        .split(' ')
+        .map(
+          (w) =>
+              w.isEmpty
+                  ? ''
+                  : (w[0].toUpperCase() + w.substring(1).toLowerCase()),
+        )
+        .join(' ')
+        .trim();
+  }
+
+  /* ───────── Medicines lookups (for dropdowns) ───────── */
+
+  String? normalizeMedicineName(String? raw) {
+    if (raw == null) return null;
+    var t = raw.trim().toLowerCase();
+
+    // junk filters
+    if (t.isEmpty) return null;
+    if (['unknown', 'n/a', 'na', 'none', 'nil', 'test', 'other'].contains(t)) {
+      return null;
+    }
+    if (RegExp(r'^\d+$').hasMatch(t)) return null;
+    if (t.length < 3) return null;
+
+    // Remove non-letter characters but preserve spaces
+    t = t.replaceAll(RegExp(r'[^a-z0-9\s]'), ' ');
+    t = t.replaceAll(RegExp(r'\s+'), ' ');
+
+    // Title-case
+    final words = t.split(' ').map((w) {
+      if (w.isEmpty) return '';
+      return w[0].toUpperCase() + w.substring(1);
+    });
+
+    final cleaned = words.join(' ').trim();
+    if (cleaned.isEmpty) return null;
+
+    return cleaned;
+  }
+
+  /// Canonical key used for dedupe
+  String canonKey(String s) =>
+      s.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+
+  /// Distinct GENERIC names (from Medicines), optionally narrowed by brandName.
+  /// - Trims whitespace
+  /// - Filters junk like 'unknown', 'n/a', 'na'
+  /// - Dedupes case-insensitively and ignoring spaces/punctuation
   Future<List<String>> distinctGenericNames({String? brandName}) async {
-    final needle = (brandName ?? '').trim();
-    var q = sb.from('Medicines').select('genericName, brandName');
+    final rows = await sb.from('Medicines').select('genericName, brandName');
 
-    if (needle.isNotEmpty && needle.toLowerCase() != 'all') {
-      // case-insensitive partial match against brand
-      q = q.ilike('brandName', '%$needle%');
-    }
+    final seen = <String>{};
+    final out = <String>[];
 
-    final res = await q.limit(20000);
-    final rows =
-        (res is List)
-            ? res.cast<Map<String, dynamic>>()
-            : const <Map<String, dynamic>>[];
-
-    final set = <String>{};
     for (final m in rows) {
-      final g = (m['genericName'] as String?)?.trim();
-      if (g != null && g.isNotEmpty) set.add(g);
+      final raw = m['genericName'] ?? '';
+      final cleaned = normalizeMedicineName(raw);
+      if (cleaned == null) continue;
+
+      final key = canonKey(cleaned);
+      if (seen.add(key)) out.add(cleaned);
     }
-    final list =
-        set.toList()
-          ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
-    return list;
+
+    out.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    return ['ALL', ...out];
   }
 
-  /// Distinct BRAND names (from Medicines), optionally narrowed by genericName
   Future<List<String>> distinctBrandNames({String? genericName}) async {
-    final needle = (genericName ?? '').trim();
-    var q = sb.from('Medicines').select('brandName, genericName');
+    final rows = await sb.from('Medicines').select('brandName, genericName');
 
-    if (needle.isNotEmpty && needle.toLowerCase() != 'all') {
-      // case-insensitive partial match against generic
-      q = q.ilike('genericName', '%$needle%');
-    }
+    final seen = <String>{};
+    final out = <String>[];
 
-    final res = await q.limit(20000);
-    final rows =
-        (res is List)
-            ? res.cast<Map<String, dynamic>>()
-            : const <Map<String, dynamic>>[];
-
-    final set = <String>{};
     for (final m in rows) {
-      final b = (m['brandName'] as String?)?.trim();
-      if (b != null && b.isNotEmpty) set.add(b);
+      final raw = m['brandName'] ?? '';
+      final cleaned = normalizeMedicineName(raw);
+      if (cleaned == null) continue;
+
+      final key = canonKey(cleaned);
+      if (seen.add(key)) out.add(cleaned);
     }
-    final list =
-        set.toList()
-          ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
-    return list;
+
+    out.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    return ['ALL', ...out];
   }
 
-  /* ───────── Key metrics, charts, word cloud, etc. (existing) ───────── */
+  /* ───────── INTERNAL: fetch all reports in batches (for key metrics) ───────── */
 
-  /// Key Metrics without RPC and without using `.in_()` (SDK-safe)
+  /// Page through ALL matching ADR_Reports rows (ALL-TIME).
+  /// - Ignores the date range so Key Metrics are ALL-TIME.
+  /// - Still respects optional person + medicine filters.
+  /// - Uses paging so we are not capped at 1000 rows.
+  Future<List<Map<String, dynamic>>> _fetchReportsPaged(
+    DashboardFilter f, {
+    List<dynamic>? medIds,
+  }) async {
+    const batchSize = 1000; // Supabase limit per request
+    int offset = 0;
+    final List<Map<String, dynamic>> all = [];
+
+    while (true) {
+      // Base query (NO date filter → all-time)
+      var q = sb
+          .from('ADR_Reports')
+          .select('reportID, userID, is_live, medicineId, created_at');
+
+      // person filter
+      final person = (f.personId ?? '').trim();
+      if (person.isNotEmpty) {
+        q = q.eq('userID', person);
+      }
+
+      // optional medicine filter
+      if (medIds != null && medIds.isNotEmpty) {
+        if (medIds.length == 1) {
+          q = q.eq('medicineId', medIds.first);
+        } else {
+          final ors = medIds.map((id) => 'medicineId.eq.$id').join(',');
+          q = q.or(ors);
+        }
+      }
+
+      // IMPORTANT: order + range come *after* filters
+      final rowsDynamic = await q
+          .order('reportID', ascending: true) // stable ordering
+          .range(offset, offset + batchSize - 1); // paging
+
+      final rows =
+          (rowsDynamic is List)
+              ? rowsDynamic.cast<Map<String, dynamic>>()
+              : <Map<String, dynamic>>[];
+
+      if (rows.isEmpty) break;
+
+      all.addAll(rows);
+
+      // If less than a full page was returned, we've reached the end
+      if (rows.length < batchSize) break;
+
+      offset += batchSize;
+    }
+
+    return all;
+  }
+
+  /// Page through ALL ADR_Reports rows that we need for adverse reaction counts.
+  Future<List<Map<String, dynamic>>> _fetchReactionRowsPaged(
+    DashboardFilter f, {
+    List<dynamic>? medIds,
+  }) async {
+    const batchSize = 1000; // Supabase per-request limit
+    int offset = 0;
+    final List<Map<String, dynamic>> all = [];
+
+    while (true) {
+      var q = sb
+          .from(_tblReports)
+          .select('created_at, userID, medicineId, reactionDescription')
+          .gte('created_at', _iso(f.start))
+          .lt('created_at', _iso(f.end));
+
+      // Optional person filter
+      final person = (f.personId ?? '').trim();
+      if (person.isNotEmpty) {
+        q = q.eq('userID', person);
+      }
+
+      // Optional medicine filter (avoid `.in_()`)
+      if (medIds != null && medIds.isNotEmpty) {
+        if (medIds.length == 1) {
+          q = q.eq('medicineId', medIds.first);
+        } else {
+          final ors = medIds.map((id) => 'medicineId.eq.$id').join(',');
+          q = q.or(ors);
+        }
+      }
+
+      final rowsDynamic = await q
+          .order('created_at', ascending: true)
+          .range(offset, offset + batchSize - 1);
+
+      final rows =
+          (rowsDynamic is List)
+              ? rowsDynamic.cast<Map<String, dynamic>>()
+              : <Map<String, dynamic>>[];
+
+      if (rows.isEmpty) break;
+
+      all.addAll(rows);
+
+      if (rows.length < batchSize) break; // last page
+      offset += batchSize;
+    }
+
+    return all;
+  }
+
+  Future<int> fetchReportsCount(DashboardFilter f) async {
+    final rows = await _fetchReportsPaged(f);
+    return rows.length;
+  }
+
+  Future<int> fetchValidatedReportsCount(DashboardFilter f) async {
+    final rows = await _fetchReportsPaged(f);
+
+    int validated = 0;
+    for (final r in rows) {
+      final v = r['is_live'];
+      final isValidated =
+          (v is bool && v == true) ||
+          (v is num && v != 0) ||
+          (v is String && v.toLowerCase() == 'true');
+
+      if (isValidated) {
+        validated++;
+      }
+    }
+
+    return validated;
+  }
+
+  Future<int> fetchActiveUsersCount(DashboardFilter f) async {
+    final rows = await _fetchReportsPaged(f);
+
+    final uniqueUsers = <String>{};
+
+    for (final r in rows) {
+      final id = (r['userID'] ?? '').toString().trim();
+      if (id.isNotEmpty) uniqueUsers.add(id);
+    }
+
+    return uniqueUsers.length;
+  }
+
+  /* ───────── Key metrics, charts, word cloud, etc. ───────── */
+
+  /// Key Metrics without RPC and without using `.in_()` (SDK-safe),
+  /// now using paging so we see ALL matching reports, not just first 1000.
   Future<KeyMetrics> keyMetrics(DashboardFilter f) async {
     // 1) Resolve medicine text -> Medicine IDs (brandName or genericName ILIKE)
     List<dynamic>? medIds;
-    final medNeedle = (f.medicine ?? '').trim();
-    if (medNeedle.isNotEmpty) {
+
+    final medRaw = f.medicine ?? '';
+    final medNeedle = medRaw.trim();
+
+    // 🔹 Treat null / empty / "all" as NO medicine filter
+    if (medNeedle.isNotEmpty && medNeedle.toLowerCase() != 'all') {
       final meds = await sb
           .from('Medicines')
           .select('id, brandName, genericName')
@@ -256,50 +540,23 @@ class AnalyticsRepository {
           asList
               .map((e) => (e as Map<String, dynamic>)['id'])
               .where((id) => id != null)
-              .toSet() // dedupe
+              .toSet()
               .toList();
 
+      // No matching medicines => 0 everywhere
       if (medIds.isEmpty) {
         return KeyMetrics(activeUsers: 0, reportedCases: 0, validatedPct: 0.0);
       }
     }
 
-    // 2) Base ADR_Reports query for date window
-    var q = sb
-        .from('ADR_Reports')
-        .select('userID, is_live, medicineId, created_at')
-        .gte('created_at', _iso(f.start))
-        .lt('created_at', _iso(f.end));
-
-    // Optional person filter
-    final person = (f.personId ?? '').trim();
-    if (person.isNotEmpty) {
-      q = q.eq('userID', person);
-    }
-
-    // Optional medicine filter WITHOUT `.in_()`
-    if (medIds != null) {
-      if (medIds.length == 1) {
-        q = q.eq('medicineId', medIds.first);
-      } else {
-        // Build `or()` expression: medicineId.eq.id1,medicineId.eq.id2,...
-        final ors = medIds.map((id) => 'medicineId.eq.$id').join(',');
-        q = q.or(ors);
-      }
-    }
-
-    // 3) Fetch & aggregate
-    final rowsDynamic = await q;
-    final rows =
-        (rowsDynamic is List)
-            ? rowsDynamic.cast<Map<String, dynamic>>()
-            : <Map<String, dynamic>>[];
+    // 2) Fetch *all* ADR_Reports rows for this filter (paged)
+    final rows = await _fetchReportsPaged(f, medIds: medIds);
 
     if (rows.isEmpty) {
       return KeyMetrics(activeUsers: 0, reportedCases: 0, validatedPct: 0.0);
     }
 
-    // reported_cases
+    // reported_cases = total rows
     final total = rows.length;
 
     // active_users (distinct userID)
@@ -329,7 +586,7 @@ class AnalyticsRepository {
     );
   }
 
-  // Compute monthly symptoms activity WITHOUT RPCs (SDK-safe, no .in_())
+  // Compute symptoms activity MONTHLY over the whole date range
   Future<List<SymptomPoint>> symptomsMonthly(DashboardFilter f) async {
     // If a medicine text filter is provided, resolve it to matching Medicine IDs
     List<dynamic>? medIds;
@@ -348,13 +605,13 @@ class AnalyticsRepository {
               .toSet()
               .toList();
 
-      // No matching medicine IDs ⇒ empty series, still return filled months
+      // No matching medicine IDs ⇒ empty series
       if (medIds.isEmpty) {
-        return _fillLast12Months(f.start, f.end, const <DateTime, int>{});
+        return const <SymptomPoint>[];
       }
     }
 
-    // Base ADR_Reports query
+    // Base ADR_Reports query over the WHOLE filter range
     var q = sb
         .from('ADR_Reports')
         .select('created_at, userID, medicineId')
@@ -367,7 +624,7 @@ class AnalyticsRepository {
       q = q.eq('userID', person);
     }
 
-    // Optional medicine filter (avoid .in_() for SDK compatibility)
+    // Optional medicine filter (avoid .in_())
     if (medIds != null) {
       if (medIds.length == 1) {
         q = q.eq('medicineId', medIds.first);
@@ -385,35 +642,22 @@ class AnalyticsRepository {
 
     // Count by month bucket (UTC)
     final byMonth = <DateTime, int>{};
-    DateTime monthStart(DateTime d) => DateTime.utc(d.year, d.month, 1);
+    DateTime mStart(DateTime d) => DateTime.utc(d.year, d.month, 1);
 
     for (final r in rows) {
       final ts = r['created_at'];
       if (ts == null) continue;
       final dt = (ts is DateTime) ? ts.toUtc() : DateTime.parse('$ts').toUtc();
-      final bucket = monthStart(dt);
+      final bucket = mStart(dt);
       byMonth.update(bucket, (v) => v + 1, ifAbsent: () => 1);
     }
 
-    // Return last 12 months (like your previous logic), filled with zeros
-    return _fillLast12Months(f.start, f.end, byMonth);
-  }
-
-  // --- helper to fill a continuous 12-month window ending at f.end ---
-  List<SymptomPoint> _fillLast12Months(
-    DateTime start,
-    DateTime end,
-    Map<DateTime, int> byMonth,
-  ) {
-    DateTime mStart(DateTime d) => DateTime.utc(d.year, d.month, 1);
-    var s = mStart(start);
-    final e = mStart(end);
-    final minStart = DateTime.utc(e.year, e.month - 11, 1);
-    if (s.isBefore(minStart)) s = minStart;
+    // Build all months from start..end (inclusive by month)
+    DateTime cursor = mStart(f.start);
+    final last = mStart(f.end);
 
     final out = <SymptomPoint>[];
-    var cursor = s;
-    while (!cursor.isAfter(e)) {
+    while (!cursor.isAfter(last)) {
       out.add(SymptomPoint(month: cursor, total: byMonth[cursor] ?? 0));
       cursor =
           (cursor.month == 12)
@@ -423,11 +667,9 @@ class AnalyticsRepository {
     return out;
   }
 
-  /// Build a word cloud client-side (no RPC; no legacy column names).
-  /// - Respects date range + optional person/medicine text filter.
-  /// - Uses common reaction columns and collapses noisy labels.
-  Future<List<WordItem>> wordCloud(DashboardFilter f, {int limit = 100}) async {
-    // If a medicine text filter is provided, resolve it to matching Medicine IDs
+  // Compute symptoms activity YEARLY over the whole date range
+  Future<List<SymptomPoint>> symptomsYearly(DashboardFilter f) async {
+    // Reuse the same filtering logic as monthly
     List<dynamic>? medIds;
     final medNeedle = (f.medicine ?? '').trim();
     if (medNeedle.isNotEmpty) {
@@ -444,25 +686,22 @@ class AnalyticsRepository {
               .toSet()
               .toList();
 
-      // No match -> return empty cloud fast
-      if (medIds.isEmpty) return const <WordItem>[];
+      if (medIds.isEmpty) {
+        return const <SymptomPoint>[];
+      }
     }
 
-    // Base ADR_Reports query in date window
     var q = sb
         .from('ADR_Reports')
-        .select('$_colCreatedAt, *')
-        .gte(_colCreatedAt, _iso(f.start))
-        .lt(_colCreatedAt, _iso(f.end));
+        .select('created_at, userID, medicineId')
+        .gte('created_at', _iso(f.start))
+        .lt('created_at', _iso(f.end));
 
-    // Optional person filter (matches your ADR_Reports userID/person column)
     final person = (f.personId ?? '').trim();
     if (person.isNotEmpty) {
-      // If your column is not userID, change here.
       q = q.eq('userID', person);
     }
 
-    // Optional medicine filter against resolved IDs (avoids `.in_()`)
     if (medIds != null) {
       if (medIds.length == 1) {
         q = q.eq('medicineId', medIds.first);
@@ -472,27 +711,66 @@ class AnalyticsRepository {
       }
     }
 
-    // Fetch
     final rowsDynamic = await q;
     final rows =
         (rowsDynamic is List)
             ? rowsDynamic.cast<Map<String, dynamic>>()
             : <Map<String, dynamic>>[];
 
-    if (rows.isEmpty) return const <WordItem>[];
+    // Count per YEAR
+    final byYear = <int, int>{};
+    for (final r in rows) {
+      final ts = r['created_at'];
+      if (ts == null) continue;
+      final dt = (ts is DateTime) ? ts.toUtc() : DateTime.parse('$ts').toUtc();
+      final y = dt.year;
+      byYear.update(y, (v) => v + 1, ifAbsent: () => 1);
+    }
 
-    // Reaction field candidates we’ll sniff (same set you already use elsewhere)
-    const candidates = <String>[
-      'reactionDescription',
-      'reaction_pt',
-      'reaction',
-      'adr_category',
-      'adverse_reaction',
-      'adverseReaction',
-      'reactionTerm',
-      'reportedReaction',
-      'reaction_label',
-    ];
+    final years = byYear.keys.toList()..sort();
+    final out = <SymptomPoint>[];
+    for (final y in years) {
+      out.add(
+        SymptomPoint(
+          month: DateTime.utc(y, 1, 1), // use Jan 1 as "year label"
+          total: byYear[y] ?? 0,
+        ),
+      );
+    }
+    return out;
+  }
+  /* ───────── Adverse Reactions: counts by reaction label (via backend NER+normalizer) ───────── */
+
+  Future<Map<String, int>> adverseReactionsCounts(DashboardFilter f) async {
+    // 1) Resolve medicine text filter -> Medicine IDs (same logic as symptoms/wordCloud)
+    List<dynamic>? medIds;
+    final medNeedle = (f.medicine ?? '').trim();
+
+    if (medNeedle.isNotEmpty && medNeedle.toLowerCase() != 'all') {
+      final meds = await sb
+          .from('Medicines')
+          .select('id, brandName, genericName')
+          .or('brandName.ilike.%$medNeedle%,genericName.ilike.%$medNeedle%');
+
+      final asList =
+          (meds is List)
+              ? meds.cast<Map<String, dynamic>>()
+              : <Map<String, dynamic>>[];
+
+      medIds =
+          asList.map((e) => e['id']).where((id) => id != null).toSet().toList();
+
+      // No match -> no reactions
+      if (medIds.isEmpty) return const {};
+    }
+
+    // 2) Fetch ALL ADR_Reports rows in the time window (paged – no 1000-row cap)
+    final rows = await _fetchReactionRowsPaged(f, medIds: medIds);
+    if (rows.isEmpty) return const {};
+
+    // 3) Local bucketing: raw text -> count (to reduce payload to backend)
+    // For the pie we only care about reactionDescription (it is non-empty in 19k+ rows)
+    const candidates = <String>['reactionDescription'];
 
     String? pick(Map<String, dynamic> m) {
       for (final k in candidates) {
@@ -504,6 +782,7 @@ class AnalyticsRepository {
 
     String clean(String s) => s.trim().replaceAll(RegExp(r'\s+'), ' ');
     String canon(String s) => clean(s).toLowerCase();
+
     bool isJunk(String s) {
       final v = s.trim().toLowerCase();
       return v.isEmpty ||
@@ -514,27 +793,112 @@ class AnalyticsRepository {
           v == 'na';
     }
 
-    // Aggregate counts
-    final grouped = <String, int>{}; // canonical -> count
-    final displayFor = <String, String>{}; // canonical -> display label
+    final Map<String, int> rawCounts = {}; // key = canonical raw text
+    final Map<String, String> displayFor = {}; // key -> pretty label
 
-    for (final m in rows) {
-      final raw = pick(m) ?? 'Unspecified';
+    for (final row in rows) {
+      final raw = pick(row) ?? 'Unspecified';
       final label = isJunk(raw) ? 'Unspecified' : clean(raw);
       final key = canon(label);
       displayFor.putIfAbsent(key, () => label);
-      grouped.update(key, (v) => v + 1, ifAbsent: () => 1);
+      rawCounts.update(key, (v) => v + 1, ifAbsent: () => 1);
     }
 
-    // Sort desc, take top N, map to WordItem
+    if (rawCounts.isEmpty) return const {};
+
+    // 4) Call backend NER + ADR normalizer to merge spellings & extract entities
+    final uri = Uri.parse(
+      '${BackendConfig.baseUrl}/api/v1/analytics/normalize-reactions',
+    );
+
+    final payloadItems =
+        rawCounts.entries
+            .map((e) => {'text': displayFor[e.key] ?? e.key, 'count': e.value})
+            .toList();
+
+    try {
+      final resp = await http.post(
+        uri,
+        headers: const {'Content-Type': 'application/json'},
+        body: jsonEncode({'items': payloadItems}),
+      );
+
+      if (resp.statusCode >= 200 && resp.statusCode < 300) {
+        final decoded = jsonDecode(resp.body) as Map<String, dynamic>;
+        final List<dynamic> items = (decoded['items'] as List?) ?? const [];
+
+        final Map<String, int> result = {};
+        for (final item in items) {
+          final m = item as Map<String, dynamic>;
+          final label = (m['label'] ?? '').toString().trim();
+          if (label.isEmpty) continue;
+          final cnt = (m['count'] as num?)?.toInt() ?? 0;
+          if (cnt <= 0) continue;
+          result[label] = cnt;
+        }
+
+        // If backend returned something useful, use it
+        if (result.isNotEmpty) return result;
+      } else {
+        // ignore: avoid_print
+        print(
+          'adverseReactionsCounts: backend returned ${resp.statusCode} ${resp.body}',
+        );
+      }
+    } catch (e) {
+      // ignore: avoid_print
+      print('adverseReactionsCounts: backend call failed: $e');
+    }
+
+    // 5) Fallback: use local grouping (same behaviour as before, but no 1000-row cap)
+    final Map<String, int> fallback = {};
+    rawCounts.forEach((key, cnt) {
+      fallback[displayFor[key] ?? key] = cnt;
+    });
+    return fallback;
+  }
+
+  /// Patient Experience word cloud
+  ///
+  /// Uses the SAME cleaned + normalized ADR labels as the
+  /// Adverse Drug Reactions donut, by reusing [adverseReactionsCounts].
+  /// - When f.medicine is null / "all" → all medicines
+  /// - When f.medicine has a value     → only that medicine
+  Future<List<WordItem>> wordCloud(DashboardFilter f, {int limit = 300}) async {
+    // 1) Get normalized counts from the ADR normalizer pipeline
+    final counts = await adverseReactionsCounts(f);
+
+    if (counts.isEmpty) {
+      return const <WordItem>[];
+    }
+
+    // 2) Sort by frequency (desc)
     final entries =
-        grouped.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
+        counts.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
 
+    // 3) Convert to WordItem list (top N), skipping junk like "Unspecified"
     final out = <WordItem>[];
-    for (final e in entries.take(limit)) {
-      final label = displayFor[e.key] ?? 'Unspecified';
-      out.add(WordItem(text: label, weight: e.value));
+
+    for (final e in entries) {
+      final label = e.key.trim();
+      final value = e.value;
+      if (label.isEmpty || value <= 0) continue;
+
+      final lower = label.toLowerCase();
+
+      // ⛔ Do NOT show these in the WORD CLOUD (but they still exist in the donut)
+      if (lower == 'unspecified' ||
+          lower == 'unknown' ||
+          lower == 'n/a' ||
+          lower == 'na') {
+        continue;
+      }
+
+      out.add(WordItem(text: label, weight: value));
+
+      if (out.length >= limit) break; // only top N words in the cloud
     }
+
     return out;
   }
 
@@ -681,13 +1045,6 @@ class AnalyticsRepository {
         .gte(_colCreatedAt, _iso(f.start))
         .lte(_colCreatedAt, _iso(f.end));
 
-    if ((f.personId ?? '').isNotEmpty && _colPersonId.isNotEmpty) {
-      q = q.eq(_colPersonId, f.personId!);
-    }
-    if ((f.medicine ?? '').isNotEmpty && _colDrugName.isNotEmpty) {
-      q = q.eq(_colDrugName, f.medicine!);
-    }
-
     final List rows = await q;
     if (rows.isEmpty) {
       // ignore: avoid_print
@@ -738,75 +1095,7 @@ class AnalyticsRepository {
     return counts;
   }
 
-  /* ───────── Adverse Reactions: counts by reaction label ───────── */
-
-  Future<Map<String, int>> adverseReactionsCounts(DashboardFilter f) async {
-    var q = sb
-        .from(_tblReports)
-        .select('$_colCreatedAt, *')
-        .gte(_colCreatedAt, _iso(f.start))
-        .lt(_colCreatedAt, _iso(f.end));
-
-    if ((f.personId ?? '').isNotEmpty && _colPersonId.isNotEmpty) {
-      q = q.eq(_colPersonId, f.personId!);
-    }
-    if ((f.medicine ?? '').isNotEmpty && _colDrugName.isNotEmpty) {
-      q = q.eq(_colDrugName, f.medicine!);
-    }
-
-    final List rows = await q;
-    if (rows.isEmpty) return const {};
-
-    const candidates = <String>[
-      'reactionDescription',
-      'reaction_pt',
-      'reaction',
-      'adr_category',
-      'adverse_reaction',
-      'adverseReaction',
-      'reactionTerm',
-      'reportedReaction',
-      'reaction_label',
-    ];
-
-    String? _pick(Map<String, dynamic> m) {
-      for (final k in candidates) {
-        final v = m[k];
-        if (v is String && v.trim().isNotEmpty) return v;
-      }
-      return null;
-    }
-
-    String _clean(String s) => s.trim().replaceAll(RegExp(r'\s+'), ' ');
-    String _canon(String s) => _clean(s).toLowerCase();
-
-    bool _isJunk(String s) {
-      final v = s.trim().toLowerCase();
-      return v.isEmpty ||
-          v == 'reaction' ||
-          v == 'unspecified' ||
-          v == 'unknown' ||
-          v == 'n/a' ||
-          v == 'na';
-    }
-
-    final Map<String, int> grouped = {};
-    final Map<String, String> displayFor = {};
-
-    for (final row in rows.cast<Map<String, dynamic>>()) {
-      final raw = _pick(row) ?? 'Unspecified';
-      final label = _isJunk(raw) ? 'Unspecified' : _clean(raw);
-      final key = _canon(label);
-      displayFor.putIfAbsent(key, () => label);
-      grouped.update(key, (v) => v + 1, ifAbsent: () => 1);
-    }
-
-    final Map<String, int> out = {};
-    for (final e in grouped.entries) {
-      out[displayFor[e.key] ?? 'Unspecified'] = e.value;
-    }
-    return out;
-  }
+  /* ───────── Admin Areas / Bounds ───────── */
 
   Future<List<AdminArea>> adminAreas({
     required String level, // 'region' | 'province' | 'city'
@@ -845,15 +1134,11 @@ class AnalyticsRepository {
     }).toList();
   }
 
-  // (paste INSIDE class AnalyticsRepository, right after adminAreas())
-
   /// Cities/Municipalities helper that always uses the right parent.
   ///
   /// - If [provinceCode] is provided, fetch cities under that province.
   /// - Else if [regionCode] is provided, fetch cities under that region.
   /// - Else (both null), fetch ALL cities.
-  ///
-  /// This keeps callers simple and avoids mixing up parent scopes.
   Future<List<AdminArea>> citiesByParent({
     String? regionCode,
     String? provinceCode,
@@ -901,6 +1186,9 @@ class AnalyticsRepository {
     LatLngBounds? bbox,
     int hardLimit = 5000,
   }) async {
+    // Canonical filter values (match dropdown normalization)
+    final canonFilterBrand = _canonDrugName(brandName);
+    final canonFilterGeneric = _canonDrugName(genericName);
     // Only select columns that exist on your table
     final res = await sb
         .from(_tblReports)
@@ -986,19 +1274,21 @@ class AnalyticsRepository {
           medMap[r['medicineId']] ?? const {'brand': '', 'generic': ''};
       final brand = names['brand'] ?? '';
       final generic = names['generic'] ?? '';
+
+      final brandKey = _canonDrugName(brand);
+      final genericKey = _canonDrugName(generic);
+
+      // Apply normalized filters (exact match on canonical form)
+      if (canonFilterBrand.isNotEmpty && brandKey != canonFilterBrand) {
+        continue;
+      }
+      if (canonFilterGeneric.isNotEmpty && genericKey != canonFilterGeneric) {
+        continue;
+      }
+
       final drugDisplay =
           brand.isNotEmpty ? brand : (generic.isNotEmpty ? generic : 'Unknown');
       final drugKey = _canon(drugDisplay);
-
-      // filter by selected brand/generic BEFORE counting
-      if ((brandName ?? '').trim().isNotEmpty &&
-          !brand.toLowerCase().contains(brandName!.trim().toLowerCase())) {
-        continue;
-      }
-      if ((genericName ?? '').trim().isNotEmpty &&
-          !generic.toLowerCase().contains(genericName!.trim().toLowerCase())) {
-        continue;
-      }
 
       // Parse coordinates from latlng
       final (lat, lng) = _parseLatLng(r['latlng']);
@@ -1040,21 +1330,34 @@ class AnalyticsRepository {
     if (pts.isNotEmpty) {
       const bucketDeg = 0.05;
       final buckets = <String, List<TrendPoint>>{};
+
       for (final p in pts) {
         final key =
             '${(p.lat / bucketDeg).floor()}_${(p.lng / bucketDeg).floor()}';
         (buckets[key] ??= <TrendPoint>[]).add(p);
       }
+
       buckets.forEach((_, list) {
         final lat = list.fold<double>(0, (a, b) => a + b.lat) / list.length;
         final lng = list.fold<double>(0, (a, b) => a + b.lng) / list.length;
         final brand =
             list.first.brandName.isEmpty ? 'other' : list.first.brandName;
+
+        // Aggregate side effects inside this cluster
+        final Map<String, int> effCounts = {};
+        for (final p in list) {
+          final eff = p.sideEffect.trim();
+          if (eff.isEmpty) continue;
+          final key = eff.toLowerCase();
+          effCounts.update(key, (v) => v + 1, ifAbsent: () => 1);
+        }
+
         clusters.add(
           TrendCluster(
             center: LatLng(lat, lng),
             count: list.length,
             brandName: brand,
+            effectCounts: effCounts,
           ),
         );
       });
@@ -1069,6 +1372,14 @@ class AnalyticsRepository {
       final parts = e.key.split('|||');
       final drug = displayDrug[parts[0]] ?? 'Unknown';
       final eff = displayEff[parts[1]] ?? 'Unspecified';
+
+      final drugKey = drug.toLowerCase();
+      final effKey = eff.toLowerCase();
+
+      // Skip junk / unknown entries in the "Top side effects" list
+      if (drugKey == 'unknown') continue;
+      if (effKey == 'unknown' || effKey == 'unspecified') continue;
+
       topEffects.add(SideEffectCount(drug: drug, effect: eff, cases: e.value));
     }
 

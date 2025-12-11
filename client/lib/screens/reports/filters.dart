@@ -2,28 +2,14 @@
 import 'package:flutter/material.dart';
 
 class ReportsFilters extends StatelessWidget {
-  final List<String> timeFrames;
-  final List<String> regions;
   final List<String> medicines;
-
-  final String selectedTimeFrame;
-  final String selectedRegion;
   final String selectedMedicine;
-
-  final ValueChanged<String> onTimeFrameChanged;
-  final ValueChanged<String> onRegionChanged;
   final ValueChanged<String> onMedicineChanged;
 
   const ReportsFilters({
     super.key,
-    required this.timeFrames,
-    required this.regions,
     required this.medicines,
-    required this.selectedTimeFrame,
-    required this.selectedRegion,
     required this.selectedMedicine,
-    required this.onTimeFrameChanged,
-    required this.onRegionChanged,
     required this.onMedicineChanged,
   });
 
@@ -32,32 +18,30 @@ class ReportsFilters extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final isNarrow = constraints.maxWidth < 800;
-        const gap = 12.0;
 
         if (isNarrow) {
-          // Phone / narrow tablet: stack vertically, each fills width
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              _FilterField(
-                label: 'Time frame',
-                child: GenericDropdown<String>(
-                  items: timeFrames,
-                  value: selectedTimeFrame,
-                  onChanged: onTimeFrameChanged,
-                ),
+          // Phone / narrow tablet: full width
+          return _FilterField(
+            label: 'Medicine',
+            child: GenericDropdown<String>(
+              items: medicines,
+              value: selectedMedicine,
+              onChanged: onMedicineChanged,
+            ),
+          );
+        } else {
+          // Desktop: medicine dropdown ~¼ of the analytics width, aligned left
+          final totalWidth = constraints.maxWidth;
+          final targetWidth = totalWidth * 0.25; // 25%
+
+          return Align(
+            alignment: Alignment.centerLeft,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: targetWidth,
+                minWidth: 260, // don't get too tiny on smaller screens
               ),
-              const SizedBox(height: gap),
-              _FilterField(
-                label: 'Region',
-                child: GenericDropdown<String>(
-                  items: regions,
-                  value: selectedRegion,
-                  onChanged: onRegionChanged,
-                ),
-              ),
-              const SizedBox(height: gap),
-              _FilterField(
+              child: _FilterField(
                 label: 'Medicine',
                 child: GenericDropdown<String>(
                   items: medicines,
@@ -65,46 +49,7 @@ class ReportsFilters extends StatelessWidget {
                   onChanged: onMedicineChanged,
                 ),
               ),
-            ],
-          );
-        } else {
-          // Desktop / wide tablet: three equal columns spanning full width
-          return Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Expanded(
-                child: _FilterField(
-                  label: 'Time frame',
-                  child: GenericDropdown<String>(
-                    items: timeFrames,
-                    value: selectedTimeFrame,
-                    onChanged: onTimeFrameChanged,
-                  ),
-                ),
-              ),
-              const SizedBox(width: gap),
-              Expanded(
-                child: _FilterField(
-                  label: 'Region',
-                  child: GenericDropdown<String>(
-                    items: regions,
-                    value: selectedRegion,
-                    onChanged: onRegionChanged,
-                  ),
-                ),
-              ),
-              const SizedBox(width: gap),
-              Expanded(
-                child: _FilterField(
-                  label: 'Medicine',
-                  child: GenericDropdown<String>(
-                    items: medicines,
-                    value: selectedMedicine,
-                    onChanged: onMedicineChanged,
-                  ),
-                ),
-              ),
-            ],
+            ),
           );
         }
       },
@@ -136,7 +81,6 @@ class _FilterField extends StatelessWidget {
   }
 }
 
-/// Simple reusable dropdown used by the filters.
 class GenericDropdown<T> extends StatelessWidget {
   final List<T> items;
   final T value;

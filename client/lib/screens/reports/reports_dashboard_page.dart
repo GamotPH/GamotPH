@@ -1,7 +1,10 @@
 // lib/screens/reports/reports_dashboard_page.dart
 import 'dart:ui'; // for FontFeature (kept to avoid breaking imports)
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import '../../data/backend_config.dart';
 
 import 'filters.dart';
 import 'keyMetrics.dart';
@@ -9,46 +12,25 @@ import 'symptomsActivity.dart';
 import 'clinicalManagement.dart';
 import 'patientExperience.dart';
 import 'geoTable.dart';
+import '../../data/providers.dart'; // <-- ensure this is imported for updateDashboardFilter()
 
-class ReportsDashboardPage extends StatefulWidget {
+class ReportsDashboardPage extends ConsumerStatefulWidget {
   const ReportsDashboardPage({super.key});
 
   @override
-  State<ReportsDashboardPage> createState() => _ReportsDashboardPageState();
+  ConsumerState<ReportsDashboardPage> createState() =>
+      _ReportsDashboardPageState();
 }
 
-class _ReportsDashboardPageState extends State<ReportsDashboardPage> {
+class _ReportsDashboardPageState extends ConsumerState<ReportsDashboardPage> {
   // Dropdown options
-  // Time frame choices for the entire dashboard.
-  final _timeFrames = const ['Daily', 'Weekly', 'Monthly', 'Yearly'];
+  final List<String> _timeFrames = ['Yearly', 'Monthly'];
+  String _selectedTimeFrame = 'Yearly'; // still used only for passing down
+  // (the panels ignore it now)
 
-  // Regions – align these with the regions used in your heat maps.
-  final _regions = const [
-    'All',
-    'Ilocos Region',
-    'Cagayan Valley',
-    'Central Luzon',
-    'CALABARZON',
-    'MIMAROPA',
-    'Bicol Region',
-    'Western Visayas',
-    'Central Visayas',
-    'Eastern Visayas',
-    'Zamboanga Peninsula',
-    'Northern Mindanao',
-    'Davao Region',
-    'SOCCSKSARGEN',
-    'CAR',
-    'BARMM',
-    'NCR',
-  ];
-
-  List<String> _medicines = ['All'];
-
-  // Current selections
-  String _selectedTimeFrame = 'Monthly';
-  String _selectedRegion = 'All';
   String _selectedMedicine = 'All';
+  bool _isFiltersLoading = true;
+  List<String> _medicines = ['All'];
 
   @override
   void initState() {
@@ -58,44 +40,48 @@ class _ReportsDashboardPageState extends State<ReportsDashboardPage> {
 
   Future<void> _fetchMedicines() async {
     try {
-      final supabase = Supabase.instance.client;
+      // GET /api/v1/analytics/medicine-names from the Python backend
+      final uri = BackendConfig.uri('/api/v1/analytics/medicine-names');
+      final resp = await http.get(uri);
 
-      // NOTE: column name is genericName, not generic_name
-      final data = await supabase.from('Medicines').select('genericName');
+      if (resp.statusCode != 200) {
+        debugPrint(
+          'Failed to fetch medicines: '
+          '${resp.statusCode} ${resp.body}',
+        );
+        return;
+      }
 
-      // data should be a List<dynamic>
-      final uniqueNames = <String>{};
+      final decoded = jsonDecode(resp.body);
 
-      for (final row in data as List<dynamic>) {
-        // use the correct key from your table: 'genericName'
-        final name = (row['genericName'] as String?)?.trim();
-        if (name != null && name.isNotEmpty) {
-          uniqueNames.add(name);
+      final names = <String>{};
+      if (decoded is List) {
+        for (final item in decoded) {
+          if (item is String && item.trim().isNotEmpty) {
+            names.add(item.trim());
+          }
         }
       }
 
-      final sortedNames =
-          uniqueNames.toList()
+      final list =
+          names.toList()
             ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
 
+      if (!mounted) return;
       setState(() {
-        _medicines = ['All', ...sortedNames];
-
-        // make sure the selected value is still valid
-        if (!_medicines.contains(_selectedMedicine)) {
-          _selectedMedicine = 'All';
-        }
+        _medicines = ['All', ...list];
+        _isFiltersLoading = false;
       });
-
-      // Optional debug:
-      // debugPrint('Loaded medicines: $_medicines');
     } catch (e, st) {
-      // Optional: log so you can see errors in the console
-      // debugPrint('Error loading medicines: $e\n$st');
+      debugPrint('Error fetching medicines: $e\n$st');
+      if (!mounted) return;
+      setState(() {
+        _isFiltersLoading = false;
+      });
     }
   }
 
-  // --- Measure Key Metrics height and mirror it onto Symptoms ---
+  // --- Measure Key Metrics height and sync to Symptoms panel ---
   final GlobalKey _keyMetricsKey = GlobalKey();
   double? _measuredKeyMetricsHeight;
 
@@ -104,9 +90,7 @@ class _ReportsDashboardPageState extends State<ReportsDashboardPage> {
     if (ctx == null) return;
     final h = ctx.size?.height;
     if (h != null && h != _measuredKeyMetricsHeight) {
-      setState(() {
-        _measuredKeyMetricsHeight = h;
-      });
+      setState(() => _measuredKeyMetricsHeight = h);
     }
   }
 
@@ -116,23 +100,18 @@ class _ReportsDashboardPageState extends State<ReportsDashboardPage> {
       builder: (context, c) {
         final width = c.maxWidth;
 
-        // Simple breakpoints (no new dependencies)
         final bool isDesktop = width >= 1200;
         final bool isTablet = width >= 800 && width < 1200;
         final bool isPhone = width < 800;
-
         final Axis axisForTwoUp =
             (isDesktop || isTablet) ? Axis.horizontal : Axis.vertical;
 
-        // Page padding
         final double outerPadding = isPhone ? 16.0 : 24.0;
         final double gap = isPhone ? 16.0 : 20.0;
 
-        // Card heights (tweak as needed)
         const double overviewFallbackHeight = 320;
         const double midRowHeight = 360;
 
-        // Helper: Row on wide screens (with Expanded). Column on narrow (no Expanded).
         Widget responsiveGroup({
           required Axis axis,
           required List<Widget> children,
@@ -140,33 +119,32 @@ class _ReportsDashboardPageState extends State<ReportsDashboardPage> {
           CrossAxisAlignment crossAxisAlignment = CrossAxisAlignment.start,
         }) {
           if (axis == Axis.horizontal) {
-            final rowChildren = <Widget>[];
+            final rowKids = <Widget>[];
             for (var i = 0; i < children.length; i++) {
-              rowChildren.add(Expanded(child: children[i]));
+              rowKids.add(Expanded(child: children[i]));
               if (i != children.length - 1) {
-                rowChildren.add(SizedBox(width: gap));
+                rowKids.add(SizedBox(width: gap));
               }
             }
             return Row(
               crossAxisAlignment: crossAxisAlignment,
-              children: rowChildren,
+              children: rowKids,
             );
           } else {
-            final colChildren = <Widget>[];
+            final colKids = <Widget>[];
             for (var i = 0; i < children.length; i++) {
-              colChildren.add(children[i]);
+              colKids.add(children[i]);
               if (i != children.length - 1) {
-                colChildren.add(SizedBox(height: gap));
+                colKids.add(SizedBox(height: gap));
               }
             }
             return Column(
               crossAxisAlignment: crossAxisAlignment,
-              children: colChildren,
+              children: colKids,
             );
           }
         }
 
-        // measure the Key Metrics height after layout
         WidgetsBinding.instance.addPostFrameCallback((_) {
           _captureKeyMetricsHeight();
         });
@@ -180,35 +158,30 @@ class _ReportsDashboardPageState extends State<ReportsDashboardPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Filters (full-width)
+                  // Filters
                   ReportsFilters(
-                    timeFrames: _timeFrames,
-                    regions: _regions,
                     medicines: _medicines,
-                    selectedTimeFrame: _selectedTimeFrame,
-                    selectedRegion: _selectedRegion,
                     selectedMedicine: _selectedMedicine,
-                    onTimeFrameChanged:
-                        (v) => setState(() => _selectedTimeFrame = v),
-                    onRegionChanged: (v) => setState(() => _selectedRegion = v),
-                    onMedicineChanged:
-                        (v) => setState(() => _selectedMedicine = v),
+                    onMedicineChanged: (value) {
+                      setState(() => _selectedMedicine = value);
+
+                      // Update global dashboard filter (medicine only).
+                      updateDashboardFilter(ref, medicine: value);
+                    },
                   ),
+
                   SizedBox(height: gap),
 
-                  // === Overview row (Key Metrics + Symptoms Activity) ===
+                  // Key Metrics + Symptoms Activity
                   if (axisForTwoUp == Axis.horizontal)
                     responsiveGroup(
                       axis: axisForTwoUp,
                       gap: gap,
                       children: [
-                        // Key Metrics
                         KeyedSubtree(
                           key: _keyMetricsKey,
                           child: const KeyMetricsPanel(),
                         ),
-
-                        // Symptoms Activity
                         SizedBox(
                           height:
                               _measuredKeyMetricsHeight ??
@@ -218,8 +191,6 @@ class _ReportsDashboardPageState extends State<ReportsDashboardPage> {
                                 _measuredKeyMetricsHeight ??
                                 overviewFallbackHeight,
                             timeframe: _selectedTimeFrame,
-                            // pass region through the existing "people" prop
-                            people: _selectedRegion,
                             medicine: _selectedMedicine,
                           ),
                         ),
@@ -243,7 +214,6 @@ class _ReportsDashboardPageState extends State<ReportsDashboardPage> {
                                 _measuredKeyMetricsHeight ??
                                 overviewFallbackHeight,
                             timeframe: _selectedTimeFrame,
-                            people: _selectedRegion,
                             medicine: _selectedMedicine,
                           ),
                         ),
@@ -252,7 +222,7 @@ class _ReportsDashboardPageState extends State<ReportsDashboardPage> {
 
                   SizedBox(height: gap),
 
-                  // === Clinical Management + Patient Experience ===
+                  // Clinical Mgmt + Patient Experience
                   responsiveGroup(
                     axis: axisForTwoUp,
                     gap: gap,
@@ -265,13 +235,13 @@ class _ReportsDashboardPageState extends State<ReportsDashboardPage> {
                       ),
                     ],
                   ),
+
                   SizedBox(height: gap),
 
-                  // === Geo Distribution (full width) ===
+                  // Geo Table
                   responsiveGroup(
                     axis: axisForTwoUp,
                     gap: gap,
-                    // Only one child -> Expanded in horizontal mode makes it fill the row.
                     children: const [GeoTablePanel()],
                   ),
                 ],
@@ -284,7 +254,7 @@ class _ReportsDashboardPageState extends State<ReportsDashboardPage> {
   }
 }
 
-// === Helper extensions to easily tweak card heights without changing constructors ===
+// --- panel height helpers ---
 extension _PanelHeight on KeyMetricsPanel {
   KeyMetricsPanel copyWithHeight(double h) =>
       KeyMetricsPanel(height: h, key: key);
