@@ -5,3 +5,7 @@
 !/client/build/
 !/client/build/web/
 !/client/build/web/**
+
+
+.DS_Store
+**/.DS_Store
