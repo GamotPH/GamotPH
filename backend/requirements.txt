@@ -6,3 +6,5 @@ httpx
 pydantic
 numpy
 scikit-learn
+fuzzywuzzy
+python-Levenshtein
