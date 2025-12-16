@@ -7,6 +7,7 @@ class AuthInput extends StatelessWidget {
   final IconData icon;
   final bool obscureText;
   final String? Function(String?)? validator;
+  final Widget? suffixIcon;
 
   const AuthInput({
     super.key,
@@ -15,6 +16,7 @@ class AuthInput extends StatelessWidget {
     required this.icon,
     this.obscureText = false,
     this.validator,
+    this.suffixIcon,
   });
 
   @override
@@ -26,6 +28,7 @@ class AuthInput extends StatelessWidget {
       autovalidateMode: AutovalidateMode.onUserInteraction,
       decoration: InputDecoration(
         prefixIcon: Icon(icon),
+        suffixIcon: suffixIcon,
         labelText: labelText,
         errorStyle: const TextStyle(color: Colors.red, fontSize: 12),
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),

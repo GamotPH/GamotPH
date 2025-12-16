@@ -1,17 +1,30 @@
-from fastapi import APIRouter, Query
+# backend/app/api/v1/routes_analytics.py
 
-from app.services.analytics_service import get_top_adrs
+from fastapi import APIRouter, Query, Depends
 from app.services.medicine_service import get_top_medicines, get_medicine_names
+from app.services.analytics_service import get_raw_reaction_buckets
+from app.services.reaction_cleaning_service import normalize_reaction_items
+
 
 router = APIRouter(
     prefix="/api/v1/analytics",
     tags=["analytics"],
 )
 
-
 @router.get("/top-adrs")
-def top_adrs(limit: int = Query(10, ge=1, le=100)):
-    return get_top_adrs(limit=limit)
+def top_adrs(
+    limit: int = Query(10, ge=1, le=100),
+):
+    # 1. get RAW buckets
+    raw_items = get_raw_reaction_buckets()
+
+    # 2. normalize using SINGLE source of truth
+    result = normalize_reaction_items(raw_items)
+
+    # 3. apply limit AFTER normalization
+    result["items"] = result["items"][:limit]
+
+    return result
 
 
 @router.get("/top-medicines")

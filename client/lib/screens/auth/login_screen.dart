@@ -1,11 +1,11 @@
 // lib/screens/auth/login_screen.dart
-import 'package:flutter/foundation.dart' show kIsWeb;
+// import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 // Alias Supabase import
 import 'package:supabase_flutter/supabase_flutter.dart' as supabase;
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+// import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 // For LaunchMode.externalApplication on mobile OAuth
-import 'package:url_launcher/url_launcher.dart' show LaunchMode;
+// import 'package:url_launcher/url_launcher.dart' show LaunchMode;
 
 import '../../widgets/auth_input.dart';
 import 'register_screen.dart';
@@ -23,6 +23,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final password = TextEditingController();
   bool _isLoading = false;
   String? _errorMessage;
+  bool _hidePassword = true;
 
   void _showMessage(String message) {
     setState(() => _errorMessage = message);
@@ -57,24 +58,24 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  // NOTE: use sb.Provider (Supabase OAuth provider enum)
-  Future<void> _loginWithOAuth(supabase.OAuthProvider provider) async {
-    try {
-      final client = supabase.Supabase.instance.client;
+  // // NOTE: use sb.Provider (Supabase OAuth provider enum)
+  // Future<void> _loginWithOAuth(supabase.OAuthProvider provider) async {
+  //   try {
+  //     final client = supabase.Supabase.instance.client;
 
-      if (kIsWeb) {
-        final redirectTo = '${Uri.base.origin}/auth-callback';
-        await client.auth.signInWithOAuth(provider, redirectTo: redirectTo);
-      } else {
-        await client.auth.signInWithOAuth(
-          provider,
-          authScreenLaunchMode: LaunchMode.externalApplication,
-        );
-      }
-    } catch (e) {
-      _showMessage('OAuth login failed: $e');
-    }
-  }
+  //     if (kIsWeb) {
+  //       final redirectTo = '${Uri.base.origin}/auth-callback';
+  //       await client.auth.signInWithOAuth(provider, redirectTo: redirectTo);
+  //     } else {
+  //       await client.auth.signInWithOAuth(
+  //         provider,
+  //         authScreenLaunchMode: LaunchMode.externalApplication,
+  //       );
+  //     }
+  //   } catch (e) {
+  //     _showMessage('OAuth login failed: $e');
+  //   }
+  // }
 
   String? _validateEmail(String? value) {
     if (value == null || value.trim().isEmpty) return 'Email is required';
@@ -120,9 +121,22 @@ class _LoginScreenState extends State<LoginScreen> {
                         controller: password,
                         labelText: "Password",
                         icon: Icons.lock,
-                        obscureText: true,
+                        obscureText: _hidePassword,
                         validator: _validatePassword,
+                        suffixIcon: IconButton(
+                          icon: Icon(
+                            _hidePassword
+                                ? Icons.visibility
+                                : Icons.visibility_off,
+                          ),
+                          onPressed: () {
+                            setState(() {
+                              _hidePassword = !_hidePassword;
+                            });
+                          },
+                        ),
                       ),
+
                       const SizedBox(height: 28),
                       SizedBox(
                         width: double.infinity,
@@ -145,32 +159,32 @@ class _LoginScreenState extends State<LoginScreen> {
                                   ),
                         ),
                       ),
-                      const SizedBox(height: 24),
-                      const Text(
-                        'Or continue with',
-                        style: TextStyle(color: Colors.black54),
-                      ),
-                      const SizedBox(height: 12),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          IconButton(
-                            icon: const FaIcon(FontAwesomeIcons.google),
-                            onPressed:
-                                () => _loginWithOAuth(
-                                  supabase.OAuthProvider.google,
-                                ),
-                          ),
-                          const SizedBox(width: 16),
-                          IconButton(
-                            icon: const FaIcon(FontAwesomeIcons.facebook),
-                            onPressed:
-                                () => _loginWithOAuth(
-                                  supabase.OAuthProvider.facebook,
-                                ),
-                          ),
-                        ],
-                      ),
+                      // const SizedBox(height: 24),
+                      // const Text(
+                      //   'Or continue with',
+                      //   style: TextStyle(color: Colors.black54),
+                      // ),
+                      // const SizedBox(height: 12),
+                      // Row(
+                      //   mainAxisAlignment: MainAxisAlignment.center,
+                      //   children: [
+                      //     IconButton(
+                      //       icon: const FaIcon(FontAwesomeIcons.google),
+                      //       onPressed:
+                      //           () => _loginWithOAuth(
+                      //             supabase.OAuthProvider.google,
+                      //           ),
+                      //     ),
+                      //     const SizedBox(width: 16),
+                      //     IconButton(
+                      //       icon: const FaIcon(FontAwesomeIcons.facebook),
+                      //       onPressed:
+                      //           () => _loginWithOAuth(
+                      //             supabase.OAuthProvider.facebook,
+                      //           ),
+                      //     ),
+                      //   ],
+                      // ),
                       const SizedBox(height: 16),
                       const Text("Don't have an account?"),
                       TextButton(
@@ -182,7 +196,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                           );
                         },
-                        child: const Text('Register here'),
+                        child: const Text('Sign up here'),
                       ),
                     ],
                   ),

@@ -14,6 +14,8 @@ import 'package:flutter_map/flutter_map.dart' show LatLngBounds;
 import 'analytics_repository.dart';
 import 'psgc_api.dart';
 import 'backend_config.dart';
+import 'top_adr.dart';
+import 'adr_alias.dart';
 
 /* ------------------------------ Repositories ------------------------------ */
 
@@ -22,26 +24,25 @@ final repoProvider = Provider<AnalyticsRepository>(
 );
 
 /* ------------------------------ FAMILY providers -------------------------- */
+final canonicalGenericMedicinesProvider = FutureProvider<List<String>>((
+  ref,
+) async {
+  final res = await http.get(
+    BackendConfig.uri('/api/v1/medicines/canonical-generics'),
+  );
 
-final genericNameListProvider = FutureProvider.autoDispose
-    .family<List<String>, String?>((ref, brandName) async {
-      final repo = ref.read(repoProvider);
-      final list = await repo.distinctGenericNames(
-        brandName: (brandName == null || brandName == 'ALL') ? null : brandName,
-      );
-      // repo already dedupes & sorts; just prefix ALL
-      return ['ALL', ...list];
-    });
+  if (res.statusCode != 200) {
+    throw Exception('Failed to load medicines');
+  }
 
-final brandNameListProvider = FutureProvider.autoDispose
-    .family<List<String>, String?>((ref, genericName) async {
-      final repo = ref.read(repoProvider);
-      final list = await repo.distinctBrandNames(
-        genericName:
-            (genericName == null || genericName == 'ALL') ? null : genericName,
-      );
-      return ['ALL', ...list];
-    });
+  final decoded = jsonDecode(res.body);
+
+  if (decoded is! List) {
+    throw Exception('Invalid medicine response format');
+  }
+
+  return decoded.cast<String>();
+});
 
 /* ------------------------------ Global filters ---------------------------- */
 
@@ -97,7 +98,15 @@ class ClinicalSeries {
 class PieSeries {
   final List<String> labels;
   final List<double> values;
-  const PieSeries({required this.labels, required this.values});
+
+  /// 👇 NEW: drilldown buckets
+  final Map<String, Map<String, int>> breakdowns;
+
+  const PieSeries({
+    required this.labels,
+    required this.values,
+    this.breakdowns = const {},
+  });
 }
 
 /// Geo table model (matches rpc_geo_distribution -> geo_location, reports)
@@ -297,6 +306,39 @@ final reportLogsProvider = FutureProvider.autoDispose<List<ReportLogItem>>((
 
   if (rawAdrs.isEmpty) return const <ReportLogItem>[];
 
+  bool isGarbageReaction(String raw) {
+    final t = raw.trim().toLowerCase();
+
+    if (t.isEmpty) return true;
+
+    // obvious junk / placeholders
+    const junk = {
+      'unknown',
+      'unspecified',
+      'n/a',
+      'na',
+      'none',
+      'nil',
+      'test',
+      'testing',
+      'burger',
+      'random',
+      'sample',
+    };
+    if (junk.contains(t)) return true;
+
+    // too short to be meaningful
+    if (t.length < 4) return true;
+
+    // no alphabetic characters at all
+    if (!RegExp(r'[a-z]').hasMatch(t)) return true;
+
+    // numbers only
+    if (RegExp(r'^\d+$').hasMatch(t)) return true;
+
+    return false;
+  }
+
   /* ───────── 2) Collect medicineIds and fetch Medicines (no .in_()) ───────── */
 
   final Set<String> medIds = {};
@@ -323,7 +365,10 @@ final reportLogsProvider = FutureProvider.autoDispose<List<ReportLogItem>>((
 
   /* ───────── 3) Role-based filter ───────── */
 
-  Iterable<dynamic> filteredAdrs = rawAdrs;
+  Iterable<dynamic> filteredAdrs = rawAdrs.where((row) {
+    final raw = (row['reactionDescription'] ?? '').toString();
+    return !isGarbageReaction(raw);
+  });
 
   if (role == 'pharmaco' && pharmacoId != null) {
     // keep only ADRs whose medicine's pharmaco matches
@@ -385,6 +430,11 @@ final reportLogsProvider = FutureProvider.autoDispose<List<ReportLogItem>>((
   // Newest first
   items.sort((a, b) => b.createdAt.compareTo(a.createdAt));
   return items;
+});
+
+final topAdrsProvider = FutureProvider<List<TopAdr>>((ref) {
+  final repo = ref.read(repoProvider);
+  return repo.fetchTopAdrs(limit: 10);
 });
 
 /// 🔹 Top medicine by GENERIC NAME within the current filter's time range.
@@ -508,14 +558,13 @@ final adverseReactionsProvider = FutureProvider.autoDispose<PieSeries>((
   final f = ref.watch(filterProvider);
   final repo = ref.watch(repoProvider);
 
-  // 1) Get raw counts from Supabase (reactionDescription etc.)
+  // 1) Raw counts from Supabase
   final rawCounts = await repo.adverseReactionsCounts(f);
-
   if (rawCounts.isEmpty) {
-    return const PieSeries(labels: [], values: []);
+    return const PieSeries(labels: [], values: [], breakdowns: {});
   }
 
-  // 2) Build payload for backend normalizer
+  // 2) Payload for backend normalizer
   final payloadItems =
       rawCounts.entries.map((e) => {'text': e.key, 'count': e.value}).toList();
 
@@ -523,12 +572,17 @@ final adverseReactionsProvider = FutureProvider.autoDispose<PieSeries>((
     '${BackendConfig.baseUrl}/api/v1/analytics/normalize-reactions',
   );
 
-  Map<String, int> normalizedCounts = {};
+  /// Canonical merged counts
+  final Map<String, int> mergedCounts = {};
+
+  /// 🔍 Drill-down buckets
+  final Map<String, int> unmappedBreakdown = {};
+  final Map<String, int> otherBreakdown = {};
 
   try {
     final resp = await http.post(
       uri,
-      headers: {'Content-Type': 'application/json'},
+      headers: const {'Content-Type': 'application/json'},
       body: jsonEncode({'items': payloadItems}),
     );
 
@@ -538,44 +592,64 @@ final adverseReactionsProvider = FutureProvider.autoDispose<PieSeries>((
 
       for (final item in items) {
         final m = item as Map<String, dynamic>;
-        final label = (m['label'] ?? '').toString().trim();
+        final rawLabel = (m['label'] ?? '').toString().trim();
         final cnt = (m['count'] as num?)?.toInt() ?? 0;
-        if (label.isEmpty || cnt <= 0) continue;
-        normalizedCounts[label] = (normalizedCounts[label] ?? 0) + cnt;
+        if (rawLabel.isEmpty || cnt <= 0) continue;
+
+        final canonical = normalizeAdrAlias(rawLabel);
+
+        mergedCounts[canonical] = (mergedCounts[canonical] ?? 0) + cnt;
+
+        // Track unmapped raw terms
+        if (canonical == 'Medical (Unmapped)') {
+          unmappedBreakdown[rawLabel] =
+              (unmappedBreakdown[rawLabel] ?? 0) + cnt;
+        }
       }
-    } else {
-      // Backend failed → fall back to rawCounts
-      normalizedCounts = Map<String, int>.from(rawCounts);
     }
   } catch (_) {
-    // Network / JSON error → fall back to rawCounts
-    normalizedCounts = Map<String, int>.from(rawCounts);
+    // swallow — fallback below
   }
 
-  if (normalizedCounts.isEmpty) {
-    return const PieSeries(labels: [], values: []);
+  /// 🔁 HARD FALLBACK: alias-merge rawCounts
+  if (mergedCounts.isEmpty) {
+    rawCounts.forEach((label, count) {
+      final canonical = normalizeAdrAlias(label);
+      mergedCounts[canonical] = (mergedCounts[canonical] ?? 0) + count;
+
+      if (canonical == 'Medical (Unmapped)') {
+        unmappedBreakdown[label] = (unmappedBreakdown[label] ?? 0) + count;
+      }
+    });
   }
 
-  // 3) Build "Top N + Other" for the pie chart
+  if (mergedCounts.isEmpty) {
+    return const PieSeries(labels: [], values: [], breakdowns: {});
+  }
+
+  // 3️⃣ Build pie using percentage cutoff (>= 3%)
+  final total = mergedCounts.values.fold<int>(0, (a, b) => a + b);
+  if (total == 0) {
+    return const PieSeries(labels: [], values: [], breakdowns: {});
+  }
+
   final entries =
-      normalizedCounts.entries.toList()
-        ..sort((a, b) => b.value.compareTo(a.value));
-
-  const topN = 5;
-  final top = entries.take(topN).toList();
-  final tail = entries.skip(topN);
-
-  int otherSum = 0;
-  for (final e in tail) {
-    otherSum += e.value;
-  }
+      mergedCounts.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
 
   final labels = <String>[];
   final values = <double>[];
+  int otherSum = 0;
 
-  for (final e in top) {
-    labels.add(e.key);
-    values.add(e.value.toDouble());
+  for (final e in entries) {
+    final pct = e.value / total;
+
+    if (pct >= 0.03) {
+      labels.add(e.key);
+      values.add(e.value.toDouble());
+    } else {
+      otherSum += e.value;
+      otherBreakdown[e.key] = e.value;
+    }
   }
 
   if (otherSum > 0) {
@@ -583,7 +657,14 @@ final adverseReactionsProvider = FutureProvider.autoDispose<PieSeries>((
     values.add(otherSum.toDouble());
   }
 
-  return PieSeries(labels: labels, values: values);
+  return PieSeries(
+    labels: labels,
+    values: values,
+    breakdowns: {
+      if (unmappedBreakdown.isNotEmpty) 'Medical (Unmapped)': unmappedBreakdown,
+      if (otherBreakdown.isNotEmpty) 'Other': otherBreakdown,
+    },
+  );
 });
 
 /* ------------------------------ PSGC-backed areas -------------------------- */

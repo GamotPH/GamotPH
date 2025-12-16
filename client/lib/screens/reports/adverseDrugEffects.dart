@@ -1,82 +1,89 @@
-// lib/screens/reports/adverseDrugEffects.dart
+// client/lib/screens/reports/adverseDrugEffects.dart
 
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../data/providers.dart';
 
-class AdverseDrugEffectsPanel extends StatelessWidget {
+class AdverseDrugEffectsPanel extends ConsumerWidget {
   const AdverseDrugEffectsPanel({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    // Demo/static items for now; replace with your data source when wired up.
-    const items = <_AdeItem>[
-      _AdeItem(effect: 'Sakit Ulo', count: 1000, delta: 1),
-      _AdeItem(effect: 'Masakit Tyan', count: 500, delta: -2),
-      _AdeItem(effect: 'Allergy', count: 300, delta: 0),
-      _AdeItem(effect: 'Groggy', count: 300, delta: 3),
-    ];
+  Widget build(BuildContext context, WidgetRef ref) {
+    final pieAsync = ref.watch(adverseReactionsProvider);
 
     return _Panel(
       title: 'Adverse Drug Effects',
-      child: LayoutBuilder(
-        builder: (context, c) {
-          final w = c.maxWidth;
-          final isPhone = w < 600;
-          final baseText = Theme.of(context).textTheme.bodyMedium;
+      child: pieAsync.when(
+        loading:
+            () => const Padding(
+              padding: EdgeInsets.all(16),
+              child: Center(child: CircularProgressIndicator()),
+            ),
+        error:
+            (e, _) => Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text('Failed to load ADRs\n$e'),
+            ),
+        data: (series) {
+          if (series.labels.isEmpty) {
+            return const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text('No adverse drug effects found.'),
+            );
+          }
 
-          final effectStyle = baseText?.copyWith(
-            fontWeight: FontWeight.w600,
-            fontSize: isPhone ? 13 : 14,
-          );
-
-          final countStyle = baseText?.copyWith(
-            fontSize: isPhone ? 12 : 13,
-            fontFeatures: const [FontFeature.tabularFigures()],
-          );
-
-          final rowVPadding = isPhone ? 4.0 : 6.0;
-          final iconSize = isPhone ? 14.0 : 16.0;
-          final gap = isPhone ? 6.0 : 8.0;
-
-          // Use ListView with shrinkWrap so it can live inside a parent scroll view without overflow.
           return ListView.separated(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
-            itemCount: items.length,
-            separatorBuilder: (_, __) => SizedBox(height: isPhone ? 4 : 6),
+            itemCount: series.labels.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 6),
             itemBuilder: (_, i) {
-              final it = items[i];
-              final up = it.delta >= 0;
-              final color =
-                  it.delta == 0
-                      ? Theme.of(context).hintColor
-                      : (up ? Colors.green : Colors.red);
+              final label = series.labels[i];
+              final value = series.values[i].toInt();
+              final hasBreakdown = series.breakdowns.containsKey(label);
 
-              return Padding(
-                padding: EdgeInsets.symmetric(vertical: rowVPadding),
-                child: Row(
-                  children: [
-                    // Effect label
-                    Expanded(
-                      child: Text(
-                        it.effect,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: effectStyle,
+              return InkWell(
+                borderRadius: BorderRadius.circular(8),
+                onTap:
+                    hasBreakdown
+                        ? () => _showBreakdownModal(
+                          context,
+                          label,
+                          series.breakdowns[label]!,
+                        )
+                        : null,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(
+                            context,
+                          ).textTheme.bodyMedium?.copyWith(
+                            fontWeight: FontWeight.w600,
+                            decoration:
+                                hasBreakdown ? TextDecoration.underline : null,
+                          ),
+                        ),
                       ),
-                    ),
-                    // Count
-                    Text(it.count.toString(), style: countStyle),
-                    SizedBox(width: gap),
-                    // Delta icon (up/down/flat)
-                    Icon(
-                      it.delta == 0
-                          ? Icons.horizontal_rule
-                          : (up ? Icons.arrow_upward : Icons.arrow_downward),
-                      size: iconSize,
-                      color: color,
-                    ),
-                  ],
+                      Text(
+                        value.toString(),
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                      if (hasBreakdown)
+                        const Padding(
+                          padding: EdgeInsets.only(left: 6),
+                          child: Icon(Icons.chevron_right, size: 18),
+                        ),
+                    ],
+                  ),
                 ),
               );
             },
@@ -87,29 +94,69 @@ class AdverseDrugEffectsPanel extends StatelessWidget {
   }
 }
 
-/// Unused in layout but left here to avoid breaking imports or references.
-/// You can safely remove this widget later if it’s no longer used anywhere.
-class UserLeaderboardPanel extends StatelessWidget {
-  const UserLeaderboardPanel({super.key});
+/// 🔍 Drill-down modal for Unmapped / Other
+void _showBreakdownModal(
+  BuildContext context,
+  String title,
+  Map<String, int> items,
+) {
+  final entries =
+      items.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
 
-  @override
-  Widget build(BuildContext context) {
-    return _Panel(
-      title: 'User Leaderboard',
-      child: Column(
-        children: const [
-          _UserTile(name: 'Matt Villacarlos', points: 637, rank: 1, delta: 4),
-          _UserTile(name: 'Ajay Levantino', points: 637, rank: 2, delta: -2),
-          _UserTile(name: 'Mikko Magtira', points: 637, rank: 3, delta: 0),
-          _UserTile(name: 'Lorem Ipsum', points: 620, rank: 4, delta: 1),
-        ],
-      ),
-    );
-  }
+  showModalBottomSheet(
+    context: context,
+    isScrollControlled: true,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+    ),
+    builder: (_) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              title,
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 12),
+            Flexible(
+              child: ListView.separated(
+                shrinkWrap: true,
+                itemCount: entries.length,
+                separatorBuilder: (_, __) => const Divider(height: 12),
+                itemBuilder: (_, i) {
+                  final e = entries[i];
+                  return Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          e.key,
+                          style: Theme.of(context).textTheme.bodyMedium,
+                        ),
+                      ),
+                      Text(
+                        e.value.toString(),
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    ],
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      );
+    },
+  );
 }
 
-/// --- Helpers (private) ---
-
+/// --- Panel wrapper (UNCHANGED) ---
 class _Panel extends StatelessWidget {
   final String title;
   final Widget child;
@@ -129,7 +176,6 @@ class _Panel extends StatelessWidget {
           children: [
             Text(
               title,
-              // Slightly smaller on phones to prevent wrapping
               style: Theme.of(context).textTheme.titleMedium?.copyWith(
                 fontWeight: FontWeight.w700,
                 fontSize: isPhone ? 15 : 16,
@@ -142,74 +188,4 @@ class _Panel extends StatelessWidget {
       ),
     );
   }
-}
-
-class _UserTile extends StatelessWidget {
-  final String name;
-  final int points;
-  final int rank;
-  final int delta; // positive up, negative down
-  const _UserTile({
-    required this.name,
-    required this.points,
-    required this.rank,
-    required this.delta,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final up = delta >= 0;
-    final color =
-        delta == 0
-            ? Theme.of(context).hintColor
-            : (up ? Colors.green : Colors.red);
-    return ListTile(
-      dense: true,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-      leading: CircleAvatar(
-        radius: 14,
-        child: Text(
-          rank.toString(),
-          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
-        ),
-      ),
-      title: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis),
-      subtitle: const Text('88% Correct'),
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            '$points',
-            style: const TextStyle(
-              fontWeight: FontWeight.w600,
-              fontFeatures: [FontFeature.tabularFigures()],
-            ),
-          ),
-          const SizedBox(width: 8),
-          Icon(
-            delta == 0
-                ? Icons.horizontal_rule
-                : (up ? Icons.arrow_upward : Icons.arrow_downward),
-            size: 16,
-            color: color,
-          ),
-          Text(
-            delta.abs().toString(),
-            style: TextStyle(color: color, fontWeight: FontWeight.w700),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _AdeItem {
-  final String effect;
-  final int count;
-  final int delta;
-  const _AdeItem({
-    required this.effect,
-    required this.count,
-    required this.delta,
-  });
 }

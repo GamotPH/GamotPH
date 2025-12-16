@@ -8,6 +8,7 @@ import 'package:flutter_map/flutter_map.dart' show LatLngBounds;
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'backend_config.dart';
+import 'package:client/data/top_adr.dart';
 
 /* ───────── Filters ───────── */
 
@@ -60,12 +61,6 @@ class GeoRow {
   final String geoLocation;
   final int reports;
   GeoRow({required this.geoLocation, required this.reports});
-}
-
-class TopAdr {
-  final String category;
-  final int count;
-  TopAdr({required this.category, required this.count});
 }
 
 class MonthlyCount {
@@ -331,42 +326,61 @@ class AnalyticsRepository {
   /// - Trims whitespace
   /// - Filters junk like 'unknown', 'n/a', 'na'
   /// - Dedupes case-insensitively and ignoring spaces/punctuation
-  Future<List<String>> distinctGenericNames({String? brandName}) async {
-    final rows = await sb.from('Medicines').select('genericName, brandName');
+  // Future<List<String>> distinctGenericNames({String? brandName}) async {
+  //   final rows = await sb.from('Medicines').select('genericName, brandName');
 
-    final seen = <String>{};
-    final out = <String>[];
+  //   final seen = <String>{};
+  //   final out = <String>[];
 
-    for (final m in rows) {
-      final raw = m['genericName'] ?? '';
-      final cleaned = normalizeMedicineName(raw);
-      if (cleaned == null) continue;
+  //   for (final m in rows) {
+  //     final raw = m['genericName'] ?? '';
+  //     final cleaned = normalizeMedicineName(raw);
+  //     if (cleaned == null) continue;
 
-      final key = canonKey(cleaned);
-      if (seen.add(key)) out.add(cleaned);
+  //     final key = canonKey(cleaned);
+  //     if (seen.add(key)) out.add(cleaned);
+  //   }
+
+  //   out.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+  //   return ['ALL', ...out];
+  // }
+
+  // Future<List<String>> distinctBrandNames({String? genericName}) async {
+  //   final rows = await sb.from('Medicines').select('brandName, genericName');
+
+  //   final seen = <String>{};
+  //   final out = <String>[];
+
+  //   for (final m in rows) {
+  //     final raw = m['brandName'] ?? '';
+  //     final cleaned = normalizeMedicineName(raw);
+  //     if (cleaned == null) continue;
+
+  //     final key = canonKey(cleaned);
+  //     if (seen.add(key)) out.add(cleaned);
+  //   }
+
+  //   out.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+  //   return ['ALL', ...out];
+  // }
+
+  Future<List<TopAdr>> fetchTopAdrs({int limit = 10}) async {
+    final uri = BackendConfig.uri('/api/v1/analytics/top-adrs', {
+      'limit': limit.toString(),
+    });
+
+    final resp = await http.get(uri);
+
+    if (resp.statusCode != 200) {
+      throw Exception('Failed to load top ADRs');
     }
 
-    out.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
-    return ['ALL', ...out];
-  }
+    final body = jsonDecode(resp.body) as Map<String, dynamic>;
+    final items = body['items'] as List<dynamic>;
 
-  Future<List<String>> distinctBrandNames({String? genericName}) async {
-    final rows = await sb.from('Medicines').select('brandName, genericName');
-
-    final seen = <String>{};
-    final out = <String>[];
-
-    for (final m in rows) {
-      final raw = m['brandName'] ?? '';
-      final cleaned = normalizeMedicineName(raw);
-      if (cleaned == null) continue;
-
-      final key = canonKey(cleaned);
-      if (seen.add(key)) out.add(cleaned);
-    }
-
-    out.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
-    return ['ALL', ...out];
+    return items
+        .map((e) => TopAdr.fromJson(e as Map<String, dynamic>))
+        .toList();
   }
 
   /* ───────── INTERNAL: fetch all reports in batches (for key metrics) ───────── */
@@ -915,28 +929,6 @@ class AnalyticsRepository {
           (m) => GeoRow(
             geoLocation: (m['geo_location'] as String?) ?? 'Unknown',
             reports: _toInt(m['reports']),
-          ),
-        )
-        .toList();
-  }
-
-  Future<List<TopAdr>> topAdr(
-    DateTime start,
-    DateTime end, {
-    int limit = 10,
-  }) async {
-    final res = await sb.rpc(
-      'rpc_top_adr_categories',
-      params: {'start_ts': _iso(start), 'end_ts': _iso(end), 'limit_n': limit},
-    );
-
-    final list = _asList(res);
-    return list
-        .map((e) => e as Map<String, dynamic>)
-        .map(
-          (m) => TopAdr(
-            category: (m['category'] ?? '').toString(),
-            count: _toInt(m['cnt']),
           ),
         )
         .toList();

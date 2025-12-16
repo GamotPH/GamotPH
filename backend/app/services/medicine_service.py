@@ -93,10 +93,12 @@ def get_top_medicines(limit: Optional[int] = None) -> List[dict]:
     return items
 
 def get_medicine_names() -> list[str]:
-    """
-    Return a sorted list of normalized medicine names that actually appear in ADR reports.
-    Uses get_top_medicines() under the hood and strips the counts.
-    """
-    items = get_top_medicines(limit=None)  # get all
-    names = {item["medicine"] for item in items}
+    items = get_top_medicines(limit=None)
+
+    names = {
+        item["medicine"]
+        for item in items
+        if isinstance(item.get("medicine"), str)
+    }
+
     return sorted(names)

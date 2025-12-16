@@ -1,32 +1,42 @@
-from collections import Counter
+# backend/app/services/analytics_service.py
 
+from collections import Counter
 from app.db.supabase_client import supabase
-from app.normalization.adr_normalizer import normalize_adr_list
 
 ADR_TABLE_NAME = "ADR_Reports"
 ADR_RAW_COLUMN = "reactionDescription"
 
 
-def get_top_adrs(limit: int | None = None) -> list[dict]:
+def get_raw_reaction_buckets(
+    start=None,
+    end=None,
+    medicine: str | None = None,
+) -> list[dict]:
     """
-    Fetch ADR reaction descriptions from Supabase,
-    normalize them with fuzzy matching, and aggregate counts.
+    Fetch RAW reactionDescription values and aggregate counts.
+    NO normalization here.
     """
-    resp = supabase.table(ADR_TABLE_NAME).select(ADR_RAW_COLUMN).execute()
-    rows = resp.data or []
+
+    query = supabase.table(ADR_TABLE_NAME).select(ADR_RAW_COLUMN)
+
+    if start:
+        query = query.gte("created_at", start.isoformat())
+    if end:
+        query = query.lt("created_at", end.isoformat())
+    if medicine:
+        query = query.eq("canonical_generic", medicine)  # or medicineId mapping
+
+    rows = query.execute().data or []
 
     counter: Counter[str] = Counter()
 
     for row in rows:
-        raw = row.get(ADR_RAW_COLUMN) or ""
-        adrs = normalize_adr_list(raw)  # handles strings with one or many ADRs
+        raw = (row.get(ADR_RAW_COLUMN) or "").strip()
+        if not raw:
+            continue
+        counter[raw] += 1
 
-        for adr in adrs:
-            counter[adr] += 1
-
-    items = [{"adr": adr, "count": count} for adr, count in counter.most_common()]
-
-    if limit is not None:
-        items = items[:limit]
-
-    return items
+    return [
+        {"text": text, "count": count}
+        for text, count in counter.items()
+    ]

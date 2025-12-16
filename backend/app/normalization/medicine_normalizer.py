@@ -11,6 +11,41 @@ BASE_DIR = Path(__file__).parent
 # Files you already created / will create
 GENERIC_LIST_PATH = BASE_DIR / "GENERIC_LIST.txt"
 BRAND_LIST_PATH = BASE_DIR / "BRAND_LIST.txt"
+NON_MEDICAL_TOKENS = {
+    "n/a", "na", "none", "unknown", "generic",
+    "bb", "jj", "xx", "water", "burger", "mcdon",
+}
+
+GARBAGE_PATTERNS = re.compile(
+    r"""
+    ^\s*$|
+    ^n/?a$|
+    ^none$|
+    ^unknown$|
+    ^nil$|
+    ^water$|
+    ^burger$
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+def is_garbage(text: str) -> bool:
+    if not text:
+        return True
+
+    t = text.strip().lower()
+
+    if GARBAGE_PATTERNS.match(t):
+        return True
+
+    if len(t) < 4:          # kills bb, jj, aa
+        return True
+
+    if not re.search(r"[a-z]", t):
+        return True
+
+    return False
+
 
 
 # ---------- LOAD CANONICAL GENERIC LIST ----------
@@ -160,53 +195,41 @@ def normalize_brand_name(name: str, threshold: int = 85) -> Optional[str]:
 
 
 def normalize_single_medicine(name: str, threshold: int = 85) -> Optional[str]:
-    """
-    Normalize a single medicine string to a canonical name.
-
-    Algorithm:
-      1. Try brand → generic mapping first (using BRAND_LIST).
-      2. If no brand match, fuzzy-match directly to GENERIC_LIST.
-      3. If both fail (below threshold), treat as non-medicine and return None.
-    """
-    if not name:
+    if not name or is_garbage(name):
         return None
 
     name = name.strip()
-    if not name:
-        return None
 
-    # Step 1: try brand-based normalization
     generic_from_brand = normalize_brand_name(name, threshold=threshold)
     if generic_from_brand:
         return generic_from_brand
 
-    # Step 2: try direct generic fuzzy match
     generic = _fuzzy_to_generic(name, threshold=threshold)
     if generic:
         return generic
 
-    # No good match -> treat as junk / non-medicine
     return None
 
 
+
 def normalize_medicine_list(raw_text: str, threshold: int = 85) -> List[str]:
-    """
-    Split a raw text containing one or more medicine names and normalize each.
-    Returns unique canonical names.
-    """
     if not raw_text:
         return []
 
-    # Split on common separators: comma, semicolon, slash, 'and'
-    parts = re.split(r"[;,/]| and ", raw_text, flags=re.IGNORECASE)
-    normalized: List[str] = []
+    parts = re.split(
+        r"[;,/+]|\band\b",
+        raw_text,
+        flags=re.IGNORECASE,
+    )
+
+    normalized: Set[str] = set()
 
     for part in parts:
         n = normalize_single_medicine(part, threshold=threshold)
-        if n and n not in normalized:
-            normalized.append(n)
+        if n:
+            normalized.add(n)
 
-    return normalized
+    return sorted(normalized)
 
 
 def normalize_brand_and_generic(

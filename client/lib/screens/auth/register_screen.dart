@@ -1,8 +1,8 @@
 // lib/screens/auth/register_screen.dart
 import 'package:flutter/material.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+// import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' as supabase;
-import 'package:url_launcher/url_launcher.dart' show LaunchMode;
+// import 'package:url_launcher/url_launcher.dart' show LaunchMode;
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -19,6 +19,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final organization = TextEditingController();
 
   bool _isLoading = false;
+
+  bool _hidePassword = true;
+  bool _hideConfirmPassword = true;
+  String? _selectedOrganization;
 
   @override
   void dispose() {
@@ -83,20 +87,20 @@ class _RegisterScreenState extends State<RegisterScreen> {
     }
   }
 
-  Future<void> _signUpWithOAuth(supabase.OAuthProvider provider) async {
-    try {
-      await supabase.Supabase.instance.client.auth.signInWithOAuth(
-        provider,
-        redirectTo: 'http://localhost:54321/auth/callback',
-        authScreenLaunchMode: LaunchMode.externalApplication,
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('OAuth signup failed: $e')));
-    }
-  }
+  // Future<void> _signUpWithOAuth(supabase.OAuthProvider provider) async {
+  //   try {
+  //     await supabase.Supabase.instance.client.auth.signInWithOAuth(
+  //       provider,
+  //       redirectTo: 'http://localhost:54321/auth/callback',
+  //       authScreenLaunchMode: LaunchMode.externalApplication,
+  //     );
+  //   } catch (e) {
+  //     if (!mounted) return;
+  //     ScaffoldMessenger.of(
+  //       context,
+  //     ).showSnackBar(SnackBar(content: Text('OAuth signup failed: $e')));
+  //   }
+  // }
 
   String? _validateEmail(String? value) {
     if (value == null || value.trim().isEmpty) return 'Email is required';
@@ -169,12 +173,24 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   // Password
                   TextFormField(
                     controller: password,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       labelText: "Password",
-                      prefixIcon: Icon(Icons.lock),
-                      border: OutlineInputBorder(),
+                      prefixIcon: const Icon(Icons.lock),
+                      border: const OutlineInputBorder(),
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          _hidePassword
+                              ? Icons.visibility
+                              : Icons.visibility_off,
+                        ),
+                        onPressed: () {
+                          setState(() {
+                            _hidePassword = !_hidePassword;
+                          });
+                        },
+                      ),
                     ),
-                    obscureText: true,
+                    obscureText: _hidePassword,
                     validator: _validatePassword,
                   ),
                   const SizedBox(height: 16),
@@ -182,25 +198,58 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   // Confirm Password
                   TextFormField(
                     controller: confirmPassword,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       labelText: "Confirm Password",
-                      prefixIcon: Icon(Icons.lock_outline),
-                      border: OutlineInputBorder(),
+                      prefixIcon: const Icon(Icons.lock_outline),
+                      border: const OutlineInputBorder(),
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          _hideConfirmPassword
+                              ? Icons.visibility
+                              : Icons.visibility_off,
+                        ),
+                        onPressed: () {
+                          setState(() {
+                            _hideConfirmPassword = !_hideConfirmPassword;
+                          });
+                        },
+                      ),
                     ),
-                    obscureText: true,
+                    obscureText: _hideConfirmPassword,
                     validator: _validateConfirmPassword,
                   ),
+
                   const SizedBox(height: 16),
 
                   // Organization
-                  TextFormField(
-                    controller: organization,
+                  DropdownButtonFormField<String>(
+                    value: _selectedOrganization,
                     decoration: const InputDecoration(
-                      labelText: "Organization (Pharma / FDA / etc.)",
+                      labelText: "Organization",
                       prefixIcon: Icon(Icons.business),
                       border: OutlineInputBorder(),
                     ),
-                    validator: _validateOrganization,
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'Pharma Company',
+                        child: Text('Pharma Company'),
+                      ),
+                      DropdownMenuItem(value: 'FDA', child: Text('FDA')),
+                      DropdownMenuItem(value: 'DOH', child: Text('DOH')),
+                    ],
+                    onChanged: (value) {
+                      setState(() {
+                        _selectedOrganization = value;
+                        organization.text =
+                            value ?? ''; // ⭐ keeps backend logic unchanged
+                      });
+                    },
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return 'Organization is required';
+                      }
+                      return null;
+                    },
                   ),
 
                   const SizedBox(height: 28),
@@ -230,33 +279,32 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     ),
                   ),
 
-                  const SizedBox(height: 24),
-                  const Text(
-                    'Or sign up with',
-                    style: TextStyle(color: Colors.black54),
-                  ),
-                  const SizedBox(height: 12),
+                  // const SizedBox(height: 24),
+                  // const Text(
+                  //   'Or sign up with',
+                  //   style: TextStyle(color: Colors.black54),
+                  // ),
+                  // const SizedBox(height: 12),
 
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      IconButton(
-                        icon: const FaIcon(FontAwesomeIcons.google),
-                        onPressed:
-                            () =>
-                                _signUpWithOAuth(supabase.OAuthProvider.google),
-                      ),
-                      const SizedBox(width: 16),
-                      IconButton(
-                        icon: const FaIcon(FontAwesomeIcons.facebook),
-                        onPressed:
-                            () => _signUpWithOAuth(
-                              supabase.OAuthProvider.facebook,
-                            ),
-                      ),
-                    ],
-                  ),
-
+                  // Row(
+                  //   mainAxisAlignment: MainAxisAlignment.center,
+                  //   children: [
+                  //     IconButton(
+                  //       icon: const FaIcon(FontAwesomeIcons.google),
+                  //       onPressed:
+                  //           () =>
+                  //               _signUpWithOAuth(supabase.OAuthProvider.google),
+                  //     ),
+                  //     const SizedBox(width: 16),
+                  //     IconButton(
+                  //       icon: const FaIcon(FontAwesomeIcons.facebook),
+                  //       onPressed:
+                  //           () => _signUpWithOAuth(
+                  //             supabase.OAuthProvider.facebook,
+                  //           ),
+                  //     ),
+                  //   ],
+                  // ),
                   const SizedBox(height: 24),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,

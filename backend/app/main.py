@@ -8,8 +8,12 @@ from app.api.v1 import routes_analytics
 from app.services.reaction_cleaning_service import (
     router as reaction_cleaning_router,
 )
+from app.routes.medicine_routes import router as medicine_router
+
+
 
 app = FastAPI(title="GAMOTPH Backend")
+app.include_router(medicine_router)
 
 # CORS – keep as-is or restrict later
 app.add_middleware(

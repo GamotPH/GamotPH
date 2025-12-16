@@ -1,4 +1,4 @@
-// lib/screens/trends/trends_map_page.dart  (or your current path)
+// lib/screens/trends/trends_map_page.dart
 
 import 'dart:math' as math;
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -10,19 +10,20 @@ import 'package:latlong2/latlong.dart';
 
 import '../../data/providers.dart';
 import '../../data/analytics_repository.dart' show TrendCluster;
+import '../../data/adr_alias.dart';
 
 class TrendsMapPage extends ConsumerStatefulWidget {
   const TrendsMapPage({super.key});
+
   @override
   ConsumerState<TrendsMapPage> createState() => _TrendsMapPageState();
 }
 
 class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
-  // Local (widget) filter state
-  String _selectedGeneric = 'ALL';
-  String _selectedBrand = 'ALL';
+  // ---------------- FILTER STATE (ONLY CHANGE) ----------------
+  String _selectedMedicine = 'ALL'; // canonical generic only
 
-  // Linked area selection (null == ALL) — REGION ONLY
+  // ---------------- EXISTING STATE (UNCHANGED) ----------------
   String? _regionCode;
 
   DateTimeRange _range = DateTimeRange(
@@ -30,60 +31,29 @@ class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
     end: DateTime(DateTime.now().year, 12, 31),
   );
 
-  // Map defaults — show the whole Philippines at first paint
   final LatLng _initialCenter = const LatLng(12.8797, 121.7740);
   final double _initialZoom = 6.0;
 
-  // Map controller + dynamic sizing
   final MapController _mapController = MapController();
   double _zoom = 9.5;
-  LatLngBounds? _selectedBounds; // active bbox of chosen area (null = ALL)
+  LatLngBounds? _selectedBounds;
   bool _mapReady = false;
 
   @override
-  void initState() {
-    super.initState();
-    // Camera is aligned later in _updateBoundsAndPan once map is ready.
-  }
-
-  @override
   Widget build(BuildContext context) {
-    // Region dropdown options
+    // ---------------- DATA ----------------
     final regionsAsync = ref.watch(
       adminAreasProvider((level: AreaLevel.region, parentCode: null)),
     );
 
-    // Region-only area code
-    final String? areaCode = _regionCode;
+    final genericsAsync = ref.watch(canonicalGenericMedicinesProvider);
 
-    // Drug filters
-
-    String? normalizedBrand =
-        _selectedBrand == 'ALL' ? null : _selectedBrand.trim();
-
-    String? normalizedGeneric =
-        _selectedGeneric == 'ALL' ? null : _selectedGeneric.trim();
-
-    final genericsAsync = ref.watch(genericNameListProvider(normalizedBrand));
-
-    final brandsAsync = ref.watch(brandNameListProvider(normalizedGeneric));
-
-    // Trends query
-    final repo = ref.read(repoProvider);
-
-    // Convert to canonical form that backend expects
-    final canonBrand =
-        (_selectedBrand == 'ALL') ? null : repo.canonDrug(_selectedBrand);
-
-    final canonGeneric =
-        (_selectedGeneric == 'ALL') ? null : repo.canonDrug(_selectedGeneric);
-
+    // ---------------- TRENDS PARAMS (FILTER CHANGE ONLY) ----------------
     final params = TrendsParams(
-      areaCode: areaCode,
+      areaCode: _regionCode,
       start: _range.start.toUtc(),
       end: _range.end.toUtc(),
-      brandName: canonBrand,
-      genericName: canonGeneric,
+      genericName: _selectedMedicine == 'ALL' ? null : _selectedMedicine,
     );
 
     final trendsAsync = ref.watch(trendsProvider(params));
@@ -93,12 +63,11 @@ class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
       body: SafeArea(
         child: Row(
           children: [
-            // ------------------------- LEFT FILTER RAIL -------------------------
+            // ================= LEFT FILTER =================
             SizedBox(
               width: 320,
               child: Column(
                 children: [
-                  // Scrollable content
                   Expanded(
                     child: ListView(
                       padding: const EdgeInsets.fromLTRB(20, 16, 16, 16),
@@ -106,7 +75,7 @@ class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
                         const _PanelHeader(title: 'Map Screen'),
                         const SizedBox(height: 8),
 
-                        // ---------------- Region ----------------
+                        // -------- Region --------
                         _LabeledField(
                           label: 'Region',
                           child: _Box(
@@ -114,41 +83,37 @@ class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
                               loading: () => const _LoadingStrip(),
                               error: (e, _) => _Err('regions', e),
                               data: (regions) {
-                                // Ensure current selection exists
                                 _ensureSelectionExists(
                                   itemsCodes: regions.map((e) => e.code),
                                   current: _regionCode,
                                   clear: () {
-                                    setState(() {
-                                      _regionCode = null;
-                                    });
+                                    setState(() => _regionCode = null);
                                     _updateBoundsAndPan();
                                   },
                                 );
 
-                                final items = <DropdownMenuItem<String?>>[
-                                  const DropdownMenuItem<String?>(
-                                    value: null,
-                                    child: Text('ALL'),
-                                  ),
-                                  ...regions.map(
-                                    (r) => DropdownMenuItem<String?>(
-                                      value: r.code,
-                                      child: Text(
-                                        r.name,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ),
-                                  ),
-                                ];
                                 return DropdownButtonFormField<String?>(
                                   value: _regionCode,
                                   isExpanded: true,
-                                  items: items,
+                                  items: [
+                                    const DropdownMenuItem(
+                                      value: null,
+                                      child: Text('ALL'),
+                                    ),
+                                    ...regions.map(
+                                      (r) => DropdownMenuItem(
+                                        value: r.code,
+                                        child: Text(
+                                          r.name,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
                                   onChanged: (code) {
                                     setState(() {
                                       _regionCode = code;
-                                      _selectedBounds = null; // reset guard
+                                      _selectedBounds = null;
                                     });
                                     _updateBoundsAndPan();
                                   },
@@ -163,7 +128,7 @@ class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
 
                         const SizedBox(height: 12),
 
-                        // ---------------- Date range ----------------
+                        // -------- Date --------
                         _LabeledField(
                           label: 'Date',
                           child: InkWell(
@@ -203,32 +168,22 @@ class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
 
                         const SizedBox(height: 12),
 
-                        // ---------------- Generic Name ----------------
+                        // -------- Medicine (Generic Only) --------
                         _LabeledField(
-                          label: 'Generic Name',
+                          label: 'Medicine (Generic)',
                           child: _Box(
                             child: genericsAsync.when(
                               loading: () => const _LoadingStrip(),
-                              error: (e, _) => _Err('generics', e),
+                              error: (e, _) => _Err('medicines', e),
                               data: (list) {
-                                // Build clean sorted list + ALL
-                                final options =
-                                    <String>{...list, 'ALL'}.toList()
-                                      ..sort((a, b) {
-                                        if (a == 'ALL') return -1;
-                                        if (b == 'ALL') return 1;
-                                        return a.toLowerCase().compareTo(
-                                          b.toLowerCase(),
-                                        );
-                                      });
+                                final options = ['ALL', ...list];
 
-                                // 🔥 Clean stale/invalid selections
-                                if (!options.contains(_selectedGeneric)) {
-                                  setState(() => _selectedGeneric = 'ALL');
+                                if (!options.contains(_selectedMedicine)) {
+                                  _selectedMedicine = 'ALL';
                                 }
 
                                 return DropdownButtonFormField<String>(
-                                  value: _selectedGeneric,
+                                  value: _selectedMedicine,
                                   isExpanded: true,
                                   items:
                                       options
@@ -240,59 +195,9 @@ class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
                                           )
                                           .toList(),
                                   onChanged: (v) {
-                                    setState(
-                                      () => _selectedGeneric = v ?? 'ALL',
-                                    );
-                                  },
-                                  decoration: const InputDecoration(
-                                    border: InputBorder.none,
-                                  ),
-                                );
-                              },
-                            ),
-                          ),
-                        ),
-
-                        const SizedBox(height: 12),
-
-                        // ---------------- Brand Name ----------------
-                        _LabeledField(
-                          label: 'Brand Name',
-                          child: _Box(
-                            child: brandsAsync.when(
-                              loading: () => const _LoadingStrip(),
-                              error: (e, _) => _Err('brands', e),
-                              data: (list) {
-                                // Build clean sorted list + ALL
-                                final options =
-                                    <String>{...list, 'ALL'}.toList()
-                                      ..sort((a, b) {
-                                        if (a == 'ALL') return -1;
-                                        if (b == 'ALL') return 1;
-                                        return a.toLowerCase().compareTo(
-                                          b.toLowerCase(),
-                                        );
-                                      });
-
-                                // 🔥 Clean stale/invalid selections
-                                if (!options.contains(_selectedBrand)) {
-                                  setState(() => _selectedBrand = 'ALL');
-                                }
-
-                                return DropdownButtonFormField<String>(
-                                  value: _selectedBrand,
-                                  isExpanded: true,
-                                  items:
-                                      options
-                                          .map(
-                                            (e) => DropdownMenuItem(
-                                              value: e,
-                                              child: Text(e),
-                                            ),
-                                          )
-                                          .toList(),
-                                  onChanged: (v) {
-                                    setState(() => _selectedBrand = v ?? 'ALL');
+                                    setState(() {
+                                      _selectedMedicine = v ?? 'ALL';
+                                    });
                                   },
                                   decoration: const InputDecoration(
                                     border: InputBorder.none,
@@ -307,7 +212,7 @@ class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
                         Text('Top Side Effects', style: _Styles.sectionTitle),
                         const SizedBox(height: 8),
 
-                        // --------- Effects list ---------
+                        // -------- Effects --------
                         ClipRRect(
                           borderRadius: BorderRadius.circular(16),
                           child: Material(
@@ -329,30 +234,65 @@ class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
                                     ),
                                   ),
                               data: (res) {
-                                // Filter out Unknown / Unspecified
-                                final raw = res.topEffects;
-                                final list =
-                                    raw.where((t) {
-                                      final d = t.drug.trim().toLowerCase();
-                                      final e = t.effect.trim().toLowerCase();
-                                      if (d.isEmpty || d == 'unknown')
-                                        return false;
-                                      if (e.isEmpty ||
-                                          e == 'unknown' ||
-                                          e == 'unspecified') {
-                                        return false;
-                                      }
-                                      return true;
-                                    }).toList();
+                                final Map<String, int> counts = {};
+                                final Map<String, Set<String>> drugsByEffect =
+                                    {};
 
-                                if (list.isEmpty) {
+                                for (final t in res.topEffects) {
+                                  final rawEffect = t.effect.trim();
+
+                                  if (rawEffect.isEmpty) continue;
+                                  if (rawEffect.toLowerCase() == 'unknown' ||
+                                      rawEffect.toLowerCase() ==
+                                          'unspecified') {
+                                    continue;
+                                  }
+
+                                  // 🔑 CANONICALIZE EFFECT ONLY
+                                  final canonicalEffect = normalizeAdrAlias(
+                                    rawEffect,
+                                  );
+
+                                  counts[canonicalEffect] =
+                                      (counts[canonicalEffect] ?? 0) + t.cases;
+
+                                  // 🔑 Track drugs only for display
+                                  if (t.drug.trim().isNotEmpty) {
+                                    drugsByEffect
+                                        .putIfAbsent(
+                                          canonicalEffect,
+                                          () => <String>{},
+                                        )
+                                        .add(t.drug.trim());
+                                  }
+                                }
+
+                                if (counts.isEmpty) {
                                   return const Padding(
                                     padding: EdgeInsets.all(16),
                                     child: Center(
-                                      child: Text('No data for this filter.'),
+                                      child: Text(
+                                        'No side effects for this selection.',
+                                      ),
                                     ),
                                   );
                                 }
+
+                                final list =
+                                    counts.entries
+                                        .map(
+                                          (e) => (
+                                            effect: e.key,
+                                            cases: e.value,
+                                            drugs:
+                                                drugsByEffect[e.key] ??
+                                                const <String>{},
+                                          ),
+                                        )
+                                        .toList()
+                                      ..sort(
+                                        (a, b) => b.cases.compareTo(a.cases),
+                                      );
 
                                 return SizedBox(
                                   height: 320,
@@ -363,9 +303,17 @@ class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
                                         (_, __) => const SizedBox(height: 10),
                                     itemBuilder: (context, i) {
                                       final t = list[i];
+
+                                      final subtitle =
+                                          _selectedMedicine == 'ALL'
+                                              ? (t.drugs.length == 1
+                                                  ? t.drugs.first
+                                                  : 'Multiple medicines')
+                                              : _selectedMedicine;
+
                                       return _EffectTile(
-                                        drug: t.drug,
-                                        effect: t.effect,
+                                        effect: t.effect, // BIG text
+                                        drug: subtitle, // small text
                                         cases: t.cases,
                                       );
                                     },
@@ -379,7 +327,6 @@ class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
                     ),
                   ),
 
-                  // Pinned button at the bottom
                   Padding(
                     padding: const EdgeInsets.fromLTRB(20, 0, 16, 16),
                     child: SizedBox(
@@ -405,12 +352,13 @@ class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
               ),
             ),
 
-            // ------------------------------- MAP --------------------------------
+            // ================= MAP =================
             Expanded(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(8, 16, 16, 16),
                 child: Stack(
                   children: [
+                    // ================= MAP CONTAINER =================
                     Container(
                       decoration: BoxDecoration(
                         border: Border.all(
@@ -442,12 +390,10 @@ class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
                               userAgentPackageName: 'com.gamotph.app',
                             ),
 
-                            // Heat circles (strictly inside bbox when a specific area is chosen)
                             trendsAsync.maybeWhen(
                               data: (res) {
-                                final bool showingAll = _regionCode == null;
-                                if (!showingAll && _selectedBounds == null) {
-                                  // Area selected but bbox not ready yet -> hide circles briefly
+                                if (_regionCode != null &&
+                                    _selectedBounds == null) {
                                   return const SizedBox.shrink();
                                 }
                                 return CircleLayer(
@@ -461,11 +407,10 @@ class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
                               orElse: () => const SizedBox.shrink(),
                             ),
 
-                            // Transparent markers on top, used only for hover tooltips
                             trendsAsync.maybeWhen(
                               data: (res) {
-                                final bool showingAll = _regionCode == null;
-                                if (!showingAll && _selectedBounds == null) {
+                                if (_regionCode != null &&
+                                    _selectedBounds == null) {
                                   return const SizedBox.shrink();
                                 }
                                 return MarkerLayer(
@@ -483,32 +428,11 @@ class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
                       ),
                     ),
 
-                    // Heat legend
-                    Positioned(
-                      top: 16,
-                      right: 24,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 6,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.9),
-                          borderRadius: BorderRadius.circular(10),
-                          boxShadow: const [
-                            BoxShadow(color: Colors.black12, blurRadius: 6),
-                          ],
-                        ),
-                        child: Row(
-                          children: [
-                            _legendSwatch(_heatColor(0.2), 'Low'),
-                            const SizedBox(width: 8),
-                            _legendSwatch(_heatColor(0.6), 'Med'),
-                            const SizedBox(width: 8),
-                            _legendSwatch(_heatColor(1.0), 'High'),
-                          ],
-                        ),
-                      ),
+                    // ================= LEGEND OVERLAY (ADD THIS) =================
+                    const Positioned(
+                      bottom: 16,
+                      right: 16,
+                      child: _HeatLegend(),
                     ),
                   ],
                 ),
@@ -520,234 +444,149 @@ class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
     );
   }
 
-  // ---------------------- bounds + camera helpers ----------------------
+  // ================= HELPERS (UNCHANGED) =================
   Future<void> _updateBoundsAndPan() async {
     if (!_mapReady) return;
 
-    final String? code = _regionCode;
-
-    // ALL regions -> zoom out to PH
+    final code = _regionCode;
     if (code == null) {
       setState(() => _selectedBounds = null);
-
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        _mapController.move(const LatLng(12.8797, 121.7740), 6.0);
+        _mapController.move(_initialCenter, 6.0);
       });
       return;
     }
 
-    // Fetch bbox for the selected code
     final bbox = await ref.read(repoProvider).adminBounds(code);
-
-    if (!mounted) return;
-
-    if (bbox == null) {
-      setState(() => _selectedBounds = null);
-      return;
-    }
+    if (!mounted || bbox == null) return;
 
     setState(() => _selectedBounds = bbox);
 
     _mapController.fitCamera(
-      CameraFit.bounds(
-        bounds: bbox,
-        padding: const EdgeInsets.only(
-          left: 12,
-          right: 12,
-          top: 12,
-          bottom: 12,
-        ),
-      ),
+      CameraFit.bounds(bounds: bbox, padding: const EdgeInsets.all(12)),
     );
   }
 
-  // 🔽 ADD THIS BELOW THE CLASS — BUT BEFORE _buildHeatMarkersFiltered()
   String _buildTooltip(TrendCluster c) {
     final buffer = StringBuffer();
-
     buffer.writeln('Total reports: ${c.count}');
-
     if (c.effectCounts.isNotEmpty) {
       buffer.writeln('\nTop symptoms:');
-
       final sorted =
           c.effectCounts.entries.toList()
             ..sort((a, b) => b.value.compareTo(a.value));
-
       for (final e in sorted.take(3)) {
         buffer.writeln('• ${e.key} (${e.value})');
       }
-    } else {
-      buffer.writeln('\nNo symptom data.');
     }
-
     return buffer.toString();
   }
 
-  // --------------------------- heat helpers ---------------------------
-  // Keep circles visible at any zoom (pixel radius), clamp to selected bounds.
   List<CircleMarker> _buildHeatCirclesFiltered(
     List<TrendCluster> clusters, {
     LatLngBounds? bounds,
     required double zoom,
   }) {
-    if (clusters.isEmpty) return const <CircleMarker>[];
-
-    int minC = clusters.first.count;
-    int maxC = clusters.first.count;
+    if (clusters.isEmpty) return const [];
+    int minC = clusters.first.count, maxC = clusters.first.count;
     for (final c in clusters) {
-      if (c.count < minC) minC = c.count;
-      if (c.count > maxC) maxC = c.count;
+      minC = math.min(minC, c.count);
+      maxC = math.max(maxC, c.count);
     }
-    final denom = (maxC - minC) == 0 ? 1.0 : (maxC - minC).toDouble();
-
-    final items = <CircleMarker>[];
-    for (final c in clusters) {
-      if (bounds != null && !_insideBounds(bounds, c.center)) continue;
-
-      final t = (c.count - minC) / denom;
-      final color = _heatColor(t);
-      final px = _radiusForZoom(zoom, c.count); // pixel radius
-
-      items.add(
-        CircleMarker(
-          point: c.center,
-          useRadiusInMeter: false,
-          radius: px,
-          color: color.withValues(alpha: 0.55),
-          borderColor: color.withValues(alpha: 0.75),
-          borderStrokeWidth: 1.8,
-        ),
-      );
-    }
-    return items;
+    final denom = (maxC - minC) == 0 ? 1 : (maxC - minC);
+    return clusters
+        .where((c) => bounds == null || _insideBounds(bounds, c.center))
+        .map((c) {
+          final t = (c.count - minC) / denom;
+          final color = _heatColor(t);
+          final r = _radiusForZoom(zoom, c.count);
+          return CircleMarker(
+            point: c.center,
+            radius: r,
+            useRadiusInMeter: false,
+            color: color.withValues(alpha: 0.55),
+            borderColor: color.withValues(alpha: 0.75),
+            borderStrokeWidth: 1.8,
+          );
+        })
+        .toList();
   }
 
-  // Same filtering & color logic as circles, but as Markers so we can show tooltips.
   List<Marker> _buildHeatMarkersFiltered(
     List<TrendCluster> clusters, {
     LatLngBounds? bounds,
     required double zoom,
   }) {
-    if (clusters.isEmpty) return const <Marker>[];
-
-    int minC = clusters.first.count;
-    int maxC = clusters.first.count;
+    if (clusters.isEmpty) return const [];
+    int minC = clusters.first.count, maxC = clusters.first.count;
     for (final c in clusters) {
-      if (c.count < minC) minC = c.count;
-      if (c.count > maxC) maxC = c.count;
+      minC = math.min(minC, c.count);
+      maxC = math.max(maxC, c.count);
     }
-    final denom = (maxC - minC) == 0 ? 1.0 : (maxC - minC).toDouble();
-
-    final markers = <Marker>[];
-    for (final c in clusters) {
-      if (bounds != null && !_insideBounds(bounds, c.center)) continue;
-
-      final t = (c.count - minC) / denom;
-      final color = _heatColor(t);
-      final px = _radiusForZoom(zoom, c.count);
-
-      final tooltipText = _buildTooltip(c);
-
-      markers.add(
-        Marker(
-          point: c.center,
-          width: px * 2,
-          height: px * 2,
-          child: Tooltip(
-            message: tooltipText,
-            preferBelow: false,
-            waitDuration: const Duration(milliseconds: 400),
-            decoration: BoxDecoration(
-              color: Colors.black87,
-              borderRadius: BorderRadius.circular(6),
-            ),
-            textStyle: const TextStyle(color: Colors.white, fontSize: 12),
-            child: Container(
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: color.withValues(alpha: 0.55),
-                border: Border.all(
-                  color: color.withValues(alpha: 0.75),
-                  width: 1.8,
+    final denom = (maxC - minC) == 0 ? 1 : (maxC - minC);
+    return clusters
+        .where((c) => bounds == null || _insideBounds(bounds, c.center))
+        .map((c) {
+          final t = (c.count - minC) / denom;
+          final color = _heatColor(t);
+          final r = _radiusForZoom(zoom, c.count);
+          return Marker(
+            point: c.center,
+            width: r * 2,
+            height: r * 2,
+            child: Tooltip(
+              message: _buildTooltip(c),
+              child: Container(
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: color.withValues(alpha: 0.55),
+                  border: Border.all(
+                    color: color.withValues(alpha: 0.75),
+                    width: 1.8,
+                  ),
                 ),
               ),
             ),
-          ),
-        ),
-      );
-    }
-    return markers;
+          );
+        })
+        .toList();
   }
 
-  bool _insideBounds(LatLngBounds b, LatLng p) {
-    return p.latitude >= b.south &&
-        p.latitude <= b.north &&
-        p.longitude >= b.west &&
-        p.longitude <= b.east;
-  }
+  bool _insideBounds(LatLngBounds b, LatLng p) =>
+      p.latitude >= b.south &&
+      p.latitude <= b.north &&
+      p.longitude >= b.west &&
+      p.longitude <= b.east;
 
-  // zoom -> pixel radius (smooth growth between z=6..14, scaled by count)
   double _radiusForZoom(double zoom, int count) {
-    final t = ((zoom - 6.0) / 8.0).clamp(0.0, 1.0); // 6..14 -> 0..1
-    final base = 8.0 + (24.0 * t); // 8..32 px
-    final bonus = (math.log(count + 1) / math.ln10) * 2.0;
-    return base + bonus;
+    final t = ((zoom - 6) / 8).clamp(0.0, 1.0);
+    return 8 + (24 * t) + (math.log(count + 1) / math.ln10) * 2;
   }
 
   static Color _heatColor(double t) {
-    t = t.clamp(0.0, 1.0);
     if (t < 0.5) {
-      final k = t / 0.5;
-      return Color.lerp(Colors.green, Colors.yellow, k)!;
-    } else {
-      final k = (t - 0.5) / 0.5;
-      return Color.lerp(Colors.yellow, Colors.red, k)!;
+      return Color.lerp(Colors.green, Colors.yellow, t / 0.5)!;
     }
+    return Color.lerp(Colors.yellow, Colors.red, (t - 0.5) / 0.5)!;
   }
-
-  Widget _legendSwatch(Color c, String label) => Row(
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      Container(
-        width: 18,
-        height: 18,
-        decoration: BoxDecoration(
-          color: c,
-          borderRadius: BorderRadius.circular(4),
-        ),
-      ),
-      const SizedBox(width: 6),
-      Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
-    ],
-  );
 
   void _printTrendMap() {
     if (kIsWeb) {
       importForWebPrint();
-      return;
-    }
-    if (mounted) {
+    } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Printing is available on web; mobile/desktop coming soon.',
-          ),
-        ),
+        const SnackBar(content: Text('Printing available on web only')),
       );
     }
   }
 
-  // ---- selection validity helper ----
   void _ensureSelectionExists({
     required Iterable<String> itemsCodes,
     required String? current,
     required VoidCallback clear,
   }) {
-    if (current == null) return;
-    final exists = itemsCodes.any((c) => c == current);
-    if (!exists) {
+    if (current != null && !itemsCodes.contains(current)) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) clear();
       });
@@ -755,15 +594,13 @@ class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
   }
 }
 
-// web print shim
-void importForWebPrint() {
-  _webPrint();
-}
+// ================= SMALL UI HELPERS =================
+
+void importForWebPrint() => _webPrint();
 
 @pragma('wasm:entry-point')
 void _webPrint() {}
 
-// --------- small UI helpers ----------
 class _PanelHeader extends StatelessWidget {
   const _PanelHeader({required this.title});
   final String title;
@@ -809,8 +646,8 @@ class _Box extends StatelessWidget {
 }
 
 class _EffectTile extends StatelessWidget {
-  final String drug;
-  final String effect;
+  final String drug; // small text (medicine)
+  final String effect; // big text (side effect)
   final int cases;
 
   const _EffectTile({
@@ -820,71 +657,95 @@ class _EffectTile extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 64,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: const [
-          BoxShadow(color: Colors.black12, blurRadius: 3, offset: Offset(0, 1)),
-        ],
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
-              color: Colors.blue.shade100,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: const Icon(Icons.medical_services, color: Colors.blue),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(
-                  drug,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w800,
-                    fontSize: 15,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                Text(
-                  effect,
-                  style: const TextStyle(color: Colors.black54, fontSize: 13),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 10),
-          Column(
+  Widget build(BuildContext context) => Container(
+    height: 64,
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+    decoration: BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(12),
+      boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 3)],
+    ),
+    child: Row(
+      children: [
+        const Icon(Icons.medical_services, color: Colors.blue),
+        const SizedBox(width: 10),
+
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              const Text(
-                'No. of Cases',
-                style: TextStyle(color: Colors.black45, fontSize: 11),
-              ),
+              // ✅ BIG: SIDE EFFECT
               Text(
-                cases.toString(),
+                effect,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
-                  fontWeight: FontWeight.w700,
-                  color: Colors.black87,
-                  fontSize: 14,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 15,
                 ),
+              ),
+
+              const SizedBox(height: 2),
+
+              // ✅ SMALL: MEDICINE(S)
+              Text(
+                drug,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: Colors.black54, fontSize: 13),
               ),
             ],
           ),
+        ),
+
+        Text(
+          cases.toString(),
+          style: const TextStyle(fontWeight: FontWeight.w700),
+        ),
+      ],
+    ),
+  );
+}
+
+class _HeatLegend extends StatelessWidget {
+  const _HeatLegend();
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      elevation: 4,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Legend', style: TextStyle(fontWeight: FontWeight.w800)),
+            const SizedBox(height: 8),
+            _legendRow(Colors.green, 'Low reports'),
+            _legendRow(Colors.yellow, 'Medium reports'),
+            _legendRow(Colors.red, 'High reports'),
+            const SizedBox(height: 6),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _legendRow(Color color, String label) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        children: [
+          Container(
+            width: 14,
+            height: 14,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 8),
+          Text(label, style: const TextStyle(fontSize: 12)),
         ],
       ),
     );
@@ -894,10 +755,8 @@ class _EffectTile extends StatelessWidget {
 class _LoadingStrip extends StatelessWidget {
   const _LoadingStrip();
   @override
-  Widget build(BuildContext context) => const Padding(
-    padding: EdgeInsets.symmetric(vertical: 12),
-    child: LinearProgressIndicator(minHeight: 2),
-  );
+  Widget build(BuildContext context) =>
+      const LinearProgressIndicator(minHeight: 2);
 }
 
 class _Err extends StatelessWidget {
@@ -905,12 +764,9 @@ class _Err extends StatelessWidget {
   final Object error;
   const _Err(this.what, this.error);
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.all(8.0),
-    child: Text(
-      'Failed to load $what:\n$error',
-      style: const TextStyle(fontSize: 12),
-    ),
+  Widget build(BuildContext context) => Text(
+    'Failed to load $what:\n$error',
+    style: const TextStyle(fontSize: 12),
   );
 }
 
@@ -923,4 +779,11 @@ class _Styles {
     fontWeight: FontWeight.w800,
     fontSize: 16,
   );
+}
+
+class _SideEffectRow {
+  final String effect;
+  final int cases;
+
+  const _SideEffectRow({required this.effect, required this.cases});
 }
