@@ -1,0 +1,7 @@
+# Ignore everything by default
+/build/
+
+# Allow Flutter web build for client (Render)
+!/client/build/
+!/client/build/web/
+!/client/build/web/**
