@@ -1,11 +1,9 @@
-# Ignore everything by default
+# Generated build output
 /build/
+/client/build/
 
-# Allow Flutter web build for client (Render)
-!/client/build/
-!/client/build/web/
-!/client/build/web/**
-
+# Local environment files
+/client/.env
 
 .DS_Store
 **/.DS_Store

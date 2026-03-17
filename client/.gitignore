@@ -4,6 +4,8 @@
 .flutter-plugins-dependencies
 .pub-cache/
 .pub/
+build/
+.env
 
 # IDE files
 .idea/
