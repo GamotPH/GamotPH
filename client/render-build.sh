@@ -8,8 +8,10 @@ FLUTTER_VERSION="3.29.2"
 FLUTTER_ARCHIVE="flutter_linux_${FLUTTER_VERSION}-stable.tar.xz"
 FLUTTER_URL="https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/${FLUTTER_ARCHIVE}"
 FLUTTER_DIR="${PWD}/.render-flutter"
+BACKEND_BASE_URL="${BACKEND_BASE_URL:-https://gamotph.onrender.com}"
 
 echo "Installing Flutter ${FLUTTER_VERSION} for Render build..."
+echo "Using backend: ${BACKEND_BASE_URL}"
 
 rm -rf "${FLUTTER_DIR}"
 mkdir -p "${FLUTTER_DIR}"
@@ -22,4 +24,4 @@ export PATH="${FLUTTER_DIR}/bin:${PATH}"
 flutter --version
 flutter config --enable-web
 flutter pub get
-flutter build web --release
+flutter build web --release --dart-define=BACKEND_BASE_URL="${BACKEND_BASE_URL}"
