@@ -149,6 +149,9 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
     if (!_formKey.currentState!.validate()) return;
 
     final userId = Supabase.instance.client.auth.currentUser?.id;
+    final genericName = drugNameController.text.trim();
+    final brandName = brandNameController.text.trim();
+    final medicineName = brandName.isNotEmpty ? brandName : genericName;
 
     final data = {
       'userID': userId,
@@ -161,8 +164,11 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
       'geoLocation': geoLocationController.text.trim(),
       'latitude': latitude,
       'longitude': longitude,
-      'drugName': drugNameController.text.trim(),
-      'brandName': brandNameController.text.trim(),
+      // Keep legacy and normalized columns in sync while the app still reads both.
+      'drugName': genericName,
+      'brandName': brandName,
+      'generic_name': genericName,
+      'medicine_name': medicineName,
       'dosage': dosageController.text.trim(),
       'administrationRoute': routeController.text.trim(),
       'reason': reasonController.text.trim(),

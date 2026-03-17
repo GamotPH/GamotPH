@@ -32,15 +32,12 @@ class ReportsFilters extends StatelessWidget {
         } else {
           // Desktop: medicine dropdown ~¼ of the analytics width, aligned left
           final totalWidth = constraints.maxWidth;
-          final targetWidth = totalWidth * 0.25; // 25%
+          final targetWidth = (totalWidth * 0.25).clamp(260.0, 360.0);
 
           return Align(
             alignment: Alignment.centerLeft,
-            child: ConstrainedBox(
-              constraints: BoxConstraints(
-                maxWidth: targetWidth,
-                minWidth: 260, // don't get too tiny on smaller screens
-              ),
+            child: SizedBox(
+              width: targetWidth.toDouble(),
               child: _FilterField(
                 label: 'Medicine',
                 child: GenericDropdown<String>(

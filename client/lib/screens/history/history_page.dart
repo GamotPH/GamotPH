@@ -43,10 +43,21 @@ class HistoryScreen extends StatelessWidget {
           itemCount: reports.length,
           itemBuilder: (context, index) {
             final report = reports[index];
+            final medicineName =
+                (report['generic_name'] as String?)?.trim().isNotEmpty == true
+                    ? (report['generic_name'] as String).trim()
+                    : (report['drugName'] as String?)?.trim().isNotEmpty == true
+                    ? (report['drugName'] as String).trim()
+                    : (report['medicine_name'] as String?)?.trim().isNotEmpty ==
+                          true
+                    ? (report['medicine_name'] as String).trim()
+                    : (report['brandName'] as String?)?.trim().isNotEmpty == true
+                    ? (report['brandName'] as String).trim()
+                    : 'Unknown medicine';
             return Card(
               margin: const EdgeInsets.symmetric(vertical: 8),
               child: ListTile(
-                title: Text(report['drugName'] ?? 'Unknown medicine'),
+                title: Text(medicineName),
                 subtitle: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [

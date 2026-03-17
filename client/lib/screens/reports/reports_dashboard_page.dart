@@ -2,9 +2,6 @@
 import 'dart:ui'; // for FontFeature (kept to avoid breaking imports)
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'dart:convert';
-import 'package:http/http.dart' as http;
-import '../../data/backend_config.dart';
 
 import 'filters.dart';
 import 'keyMetrics.dart';
@@ -29,57 +26,6 @@ class _ReportsDashboardPageState extends ConsumerState<ReportsDashboardPage> {
   // (the panels ignore it now)
 
   String _selectedMedicine = 'All';
-  bool _isFiltersLoading = true;
-  List<String> _medicines = ['All'];
-
-  @override
-  void initState() {
-    super.initState();
-    _fetchMedicines();
-  }
-
-  Future<void> _fetchMedicines() async {
-    try {
-      // GET /api/v1/analytics/medicine-names from the Python backend
-      final uri = BackendConfig.uri('/api/v1/analytics/medicine-names');
-      final resp = await http.get(uri);
-
-      if (resp.statusCode != 200) {
-        debugPrint(
-          'Failed to fetch medicines: '
-          '${resp.statusCode} ${resp.body}',
-        );
-        return;
-      }
-
-      final decoded = jsonDecode(resp.body);
-
-      final names = <String>{};
-      if (decoded is List) {
-        for (final item in decoded) {
-          if (item is String && item.trim().isNotEmpty) {
-            names.add(item.trim());
-          }
-        }
-      }
-
-      final list =
-          names.toList()
-            ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
-
-      if (!mounted) return;
-      setState(() {
-        _medicines = ['All', ...list];
-        _isFiltersLoading = false;
-      });
-    } catch (e, st) {
-      debugPrint('Error fetching medicines: $e\n$st');
-      if (!mounted) return;
-      setState(() {
-        _isFiltersLoading = false;
-      });
-    }
-  }
 
   // --- Measure Key Metrics height and sync to Symptoms panel ---
   final GlobalKey _keyMetricsKey = GlobalKey();
@@ -105,6 +51,10 @@ class _ReportsDashboardPageState extends ConsumerState<ReportsDashboardPage> {
         final bool isPhone = width < 800;
         final Axis axisForTwoUp =
             (isDesktop || isTablet) ? Axis.horizontal : Axis.vertical;
+        final medicines = ref.watch(reportMedicineNamesProvider).maybeWhen(
+          data: (items) => items,
+          orElse: () => const ['All'],
+        );
 
         final double outerPadding = isPhone ? 16.0 : 24.0;
         final double gap = isPhone ? 16.0 : 20.0;
@@ -160,7 +110,7 @@ class _ReportsDashboardPageState extends ConsumerState<ReportsDashboardPage> {
                 children: [
                   // Filters
                   ReportsFilters(
-                    medicines: _medicines,
+                    medicines: medicines,
                     selectedMedicine: _selectedMedicine,
                     onMedicineChanged: (value) {
                       setState(() => _selectedMedicine = value);

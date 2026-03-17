@@ -25,10 +25,11 @@ class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
 
   // ---------------- EXISTING STATE (UNCHANGED) ----------------
   String? _regionCode;
+  bool _isInitializingDateRange = true;
 
   DateTimeRange _range = DateTimeRange(
-    start: DateTime(DateTime.now().year, 1, 1),
-    end: DateTime(DateTime.now().year, 12, 31),
+    start: DateTime.now(),
+    end: DateTime.now(),
   );
 
   final LatLng _initialCenter = const LatLng(12.8797, 121.7740);
@@ -40,13 +41,46 @@ class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
   bool _mapReady = false;
 
   @override
+  void initState() {
+    super.initState();
+    _initializeDateRange();
+  }
+
+  Future<void> _initializeDateRange() async {
+    final firstReportDate = await ref.read(repoProvider).earliestReportDate();
+    if (!mounted) return;
+
+    final now = DateTime.now();
+    final end = DateTime(now.year, now.month, now.day);
+    final startSource = firstReportDate ?? end;
+    final start = DateTime(
+      startSource.year,
+      startSource.month,
+      startSource.day,
+    );
+
+    setState(() {
+      _range = DateTimeRange(
+        start: start.isAfter(end) ? end : start,
+        end: end,
+      );
+      _isInitializingDateRange = false;
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     // ---------------- DATA ----------------
     final regionsAsync = ref.watch(
       adminAreasProvider((level: AreaLevel.region, parentCode: null)),
     );
-
     final genericsAsync = ref.watch(canonicalGenericMedicinesProvider);
+    final pickerFirstDate = DateTime(
+      _range.start.year,
+      _range.start.month,
+      _range.start.day,
+    );
+    final pickerLastDate = DateTime.now();
 
     // ---------------- TRENDS PARAMS (FILTER CHANGE ONLY) ----------------
     final params = TrendsParams(
@@ -132,13 +166,14 @@ class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
                         _LabeledField(
                           label: 'Date',
                           child: InkWell(
-                            onTap: () async {
+                            onTap:
+                                _isInitializingDateRange
+                                    ? null
+                                    : () async {
                               final picked = await showDateRangePicker(
                                 context: context,
-                                firstDate: DateTime(2022, 1, 1),
-                                lastDate: DateTime.now().add(
-                                  const Duration(days: 365),
-                                ),
+                                firstDate: pickerFirstDate,
+                                lastDate: pickerLastDate,
                                 initialDateRange: _range,
                               );
                               if (picked != null) {
@@ -146,22 +181,28 @@ class _TrendsMapPageState extends ConsumerState<TrendsMapPage> {
                               }
                             },
                             child: _Box(
-                              child: Row(
-                                children: [
-                                  const Icon(
-                                    Icons.calendar_month_outlined,
-                                    size: 18,
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Text(
-                                      '${DateFormat('MM/dd/yy').format(_range.start)} - '
-                                      '${DateFormat('MM/dd/yy').format(_range.end)}',
-                                    ),
-                                  ),
-                                  const Icon(Icons.edit_calendar, size: 18),
-                                ],
-                              ),
+                              child:
+                                  _isInitializingDateRange
+                                      ? const _LoadingStrip()
+                                      : Row(
+                                        children: [
+                                          const Icon(
+                                            Icons.calendar_month_outlined,
+                                            size: 18,
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Expanded(
+                                            child: Text(
+                                              '${DateFormat('MM/dd/yy').format(_range.start)} - '
+                                              '${DateFormat('MM/dd/yy').format(_range.end)}',
+                                            ),
+                                          ),
+                                          const Icon(
+                                            Icons.edit_calendar,
+                                            size: 18,
+                                          ),
+                                        ],
+                                      ),
                             ),
                           ),
                         ),

@@ -1,18 +1,16 @@
 // lib/router.dart
 import 'package:flutter/material.dart';
-import 'screens/auth/login_screen.dart';
+import 'screens/auth/auth_gate.dart';
 import 'screens/auth/auth_callback_screen.dart';
 import 'screens/auth/email_confirmation_success.dart';
-import 'layout/home_layout.dart';
 
 Route<dynamic> generateRoute(RouteSettings settings) {
   switch (settings.name) {
     case '/':
-      // First page: Login
-      return MaterialPageRoute(builder: (_) => const LoginScreen());
+      return MaterialPageRoute(builder: (_) => const AuthGate(showRegister: false));
 
     case '/home':
-      return MaterialPageRoute(builder: (_) => const HomeLayout());
+      return MaterialPageRoute(builder: (_) => const AuthGate(showRegister: false));
 
     case '/auth-callback':
       // Google OAuth callback

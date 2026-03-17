@@ -156,7 +156,77 @@ class AnalyticsRepository {
   static const _tblReports = 'ADR_Reports';
   static const _colCreatedAt = 'created_at';
 
+  final Map<String, Future<List<dynamic>>> _medicineIdsCache = {};
+  final Map<String, Future<KeyMetrics>> _keyMetricsCache = {};
+  final Map<String, Future<List<SymptomPoint>>> _symptomsMonthlyCache = {};
+  final Map<String, Future<List<SymptomPoint>>> _symptomsYearlyCache = {};
+  final Map<String, Future<Map<String, int>>> _adverseReactionsCache = {};
+  final Map<String, Future<List<WordItem>>> _wordCloudCache = {};
+  final Map<String, Future<(String?, int?)>> _topMedicineCache = {};
+  final Map<String, Future<Map<String, int>>> _clinicalManagementCache = {};
+
   String _iso(DateTime dt) => dt.toUtc().toIso8601String();
+
+  String _filterCacheKey(DashboardFilter f) {
+    final person = (f.personId ?? '').trim().toLowerCase();
+    final medicine = (f.medicine ?? '').trim().toLowerCase();
+    return '${_iso(f.start)}|${_iso(f.end)}|$person|$medicine';
+  }
+
+  Future<List<dynamic>?> _resolveMedicineIds(String? medicine) async {
+    final needle = (medicine ?? '').trim();
+    if (needle.isEmpty || needle.toLowerCase() == 'all') {
+      return null;
+    }
+
+    final cacheKey = needle.toLowerCase();
+    final ids = await _medicineIdsCache.putIfAbsent(cacheKey, () async {
+      final meds = await sb
+          .from('Medicines')
+          .select('id, brandName, genericName')
+          .or('brandName.ilike.%$needle%,genericName.ilike.%$needle%');
+
+      final asList = (meds is List) ? meds : <dynamic>[];
+      return asList
+          .map((e) => (e as Map<String, dynamic>)['id'])
+          .where((id) => id != null)
+          .toSet()
+          .toList();
+    });
+
+    return ids;
+  }
+
+  void clearAnalyticsCache() {
+    _medicineIdsCache.clear();
+    _keyMetricsCache.clear();
+    _symptomsMonthlyCache.clear();
+    _symptomsYearlyCache.clear();
+    _adverseReactionsCache.clear();
+    _wordCloudCache.clear();
+    _topMedicineCache.clear();
+    _clinicalManagementCache.clear();
+  }
+
+  Future<DateTime?> earliestReportDate() async {
+    final rowsDynamic = await sb
+        .from(_tblReports)
+        .select(_colCreatedAt)
+        .order(_colCreatedAt, ascending: true)
+        .limit(1);
+
+    final rows =
+        (rowsDynamic is List)
+            ? rowsDynamic.cast<Map<String, dynamic>>()
+            : const <Map<String, dynamic>>[];
+
+    if (rows.isEmpty) return null;
+
+    final raw = rows.first[_colCreatedAt];
+    if (raw == null) return null;
+
+    return DateTime.tryParse(raw.toString())?.toLocal();
+  }
 
   List _asList(dynamic res) {
     if (res == null) return const [];
@@ -183,6 +253,67 @@ class AnalyticsRepository {
     final t = s.trim().toLowerCase();
     if (t.isEmpty) return '';
     return t.replaceAll(RegExp(r'[^a-z0-9]+'), '');
+  }
+
+  bool _isUsableMedicineName(String? value) {
+    final normalized = (value ?? '').trim();
+    if (normalized.isEmpty) return false;
+
+    final canon = _canonDrugName(normalized);
+    return canon.isNotEmpty &&
+        canon != 'unknown' &&
+        canon != 'na' &&
+        canon != 'n/a' &&
+        canon != 'none' &&
+        canon != 'null' &&
+        canon != 'unspecified';
+  }
+
+  String? _pickMedicineLabel({
+    String? generic,
+    String? drugName,
+    String? brand,
+  }) {
+    for (final candidate in [generic, drugName, brand]) {
+      if (_isUsableMedicineName(candidate)) {
+        return candidate!.trim().replaceAll(RegExp(r'\s+'), ' ');
+      }
+    }
+    return null;
+  }
+
+  String _selectedMedicineCanon(String? medicine) {
+    final value = (medicine ?? '').trim();
+    if (value.isEmpty || value.toLowerCase() == 'all') {
+      return '';
+    }
+    return _canonDrugName(value);
+  }
+
+  Future<(String?, int?)> _topMedicineFromBackend(String? selectedMedicine) async {
+    final uri = BackendConfig.uri('/api/v1/analytics/top-medicines?limit=500');
+    final resp = await http.get(uri);
+    if (resp.statusCode != 200) {
+      return (null, null);
+    }
+
+    final decoded = jsonDecode(resp.body);
+    if (decoded is! List) return (null, null);
+
+    final selectedCanon = _selectedMedicineCanon(selectedMedicine);
+
+    for (final item in decoded) {
+      if (item is! Map<String, dynamic>) continue;
+      final medicine = (item['medicine'] as String?)?.trim();
+      final count = _toInt(item['count']);
+      if (!_isUsableMedicineName(medicine) || count <= 0) continue;
+
+      if (selectedCanon.isEmpty || _canonDrugName(medicine) == selectedCanon) {
+        return (medicine, count);
+      }
+    }
+
+    return (null, null);
   }
 
   /// Public wrapper so UI can canonicalize drug names the same way backend does.
@@ -536,72 +667,54 @@ class AnalyticsRepository {
   /// Key Metrics without RPC and without using `.in_()` (SDK-safe),
   /// now using paging so we see ALL matching reports, not just first 1000.
   Future<KeyMetrics> keyMetrics(DashboardFilter f) async {
-    // 1) Resolve medicine text -> Medicine IDs (brandName or genericName ILIKE)
-    List<dynamic>? medIds;
+    final cacheKey = _filterCacheKey(f);
+    return _keyMetricsCache.putIfAbsent(cacheKey, () async {
+      final medIds = await _resolveMedicineIds(f.medicine);
 
-    final medRaw = f.medicine ?? '';
-    final medNeedle = medRaw.trim();
-
-    // 🔹 Treat null / empty / "all" as NO medicine filter
-    if (medNeedle.isNotEmpty && medNeedle.toLowerCase() != 'all') {
-      final meds = await sb
-          .from('Medicines')
-          .select('id, brandName, genericName')
-          .or('brandName.ilike.%$medNeedle%,genericName.ilike.%$medNeedle%');
-
-      final asList = (meds is List) ? meds : <dynamic>[];
-      medIds =
-          asList
-              .map((e) => (e as Map<String, dynamic>)['id'])
-              .where((id) => id != null)
-              .toSet()
-              .toList();
-
-      // No matching medicines => 0 everywhere
-      if (medIds.isEmpty) {
+      if (medIds != null && medIds.isEmpty) {
         return KeyMetrics(activeUsers: 0, reportedCases: 0, validatedPct: 0.0);
       }
-    }
 
-    // 2) Fetch *all* ADR_Reports rows for this filter (paged)
-    final rows = await _fetchReportsPaged(f, medIds: medIds);
+      final rows = await _fetchReportsPaged(f, medIds: medIds);
 
-    if (rows.isEmpty) {
-      return KeyMetrics(activeUsers: 0, reportedCases: 0, validatedPct: 0.0);
-    }
+      if (rows.isEmpty) {
+        return KeyMetrics(activeUsers: 0, reportedCases: 0, validatedPct: 0.0);
+      }
 
-    // reported_cases = total rows
-    final total = rows.length;
+      final total = rows.length;
+      final users = <String>{};
+      for (final r in rows) {
+        final uid = (r['userID'] ?? '').toString();
+        if (uid.isNotEmpty) users.add(uid);
+      }
+      final activeUsers = users.length;
 
-    // active_users (distinct userID)
-    final users = <String>{};
-    for (final r in rows) {
-      final uid = (r['userID'] ?? '').toString();
-      if (uid.isNotEmpty) users.add(uid);
-    }
-    final activeUsers = users.length;
+      int live = 0;
+      for (final r in rows) {
+        final v = r['is_live'];
+        final isLive =
+            (v is bool && v) ||
+            (v is num && v != 0) ||
+            (v is String && v.toLowerCase() == 'true');
+        if (isLive) live++;
+      }
+      final validatedPct = (total == 0) ? 0.0 : (live * 100.0 / total);
 
-    // validated_pct (% with is_live truthy)
-    int live = 0;
-    for (final r in rows) {
-      final v = r['is_live'];
-      final isLive =
-          (v is bool && v) ||
-          (v is num && v != 0) ||
-          (v is String && v.toLowerCase() == 'true');
-      if (isLive) live++;
-    }
-    final validatedPct = (total == 0) ? 0.0 : (live * 100.0 / total);
-
-    return KeyMetrics(
-      activeUsers: activeUsers,
-      reportedCases: total,
-      validatedPct: validatedPct,
-    );
+      return KeyMetrics(
+        activeUsers: activeUsers,
+        reportedCases: total,
+        validatedPct: validatedPct,
+      );
+    });
   }
 
   // Compute symptoms activity MONTHLY over the whole date range
   Future<List<SymptomPoint>> symptomsMonthly(DashboardFilter f) async {
+    final cacheKey = _filterCacheKey(f);
+    final cached = _symptomsMonthlyCache[cacheKey];
+    if (cached != null) return cached;
+
+    final Future<List<SymptomPoint>> future = (() async {
     // If a medicine text filter is provided, resolve it to matching Medicine IDs
     List<dynamic>? medIds;
     final medNeedle = (f.medicine ?? '').trim();
@@ -678,11 +791,20 @@ class AnalyticsRepository {
               ? DateTime.utc(cursor.year + 1, 1, 1)
               : DateTime.utc(cursor.year, cursor.month + 1, 1);
     }
-    return out;
+      return out;
+    })();
+
+    _symptomsMonthlyCache[cacheKey] = future;
+    return future;
   }
 
   // Compute symptoms activity YEARLY over the whole date range
   Future<List<SymptomPoint>> symptomsYearly(DashboardFilter f) async {
+    final cacheKey = _filterCacheKey(f);
+    final cached = _symptomsYearlyCache[cacheKey];
+    if (cached != null) return cached;
+
+    final Future<List<SymptomPoint>> future = (() async {
     // Reuse the same filtering logic as monthly
     List<dynamic>? medIds;
     final medNeedle = (f.medicine ?? '').trim();
@@ -751,11 +873,20 @@ class AnalyticsRepository {
         ),
       );
     }
-    return out;
+      return out;
+    })();
+
+    _symptomsYearlyCache[cacheKey] = future;
+    return future;
   }
   /* ───────── Adverse Reactions: counts by reaction label (via backend NER+normalizer) ───────── */
 
   Future<Map<String, int>> adverseReactionsCounts(DashboardFilter f) async {
+    final cacheKey = _filterCacheKey(f);
+    final cached = _adverseReactionsCache[cacheKey];
+    if (cached != null) return cached;
+
+    final Future<Map<String, int>> future = (() async {
     // 1) Resolve medicine text filter -> Medicine IDs (same logic as symptoms/wordCloud)
     List<dynamic>? medIds;
     final medNeedle = (f.medicine ?? '').trim();
@@ -775,12 +906,12 @@ class AnalyticsRepository {
           asList.map((e) => e['id']).where((id) => id != null).toSet().toList();
 
       // No match -> no reactions
-      if (medIds.isEmpty) return const {};
+      if (medIds.isEmpty) return const <String, int>{};
     }
 
     // 2) Fetch ALL ADR_Reports rows in the time window (paged – no 1000-row cap)
     final rows = await _fetchReactionRowsPaged(f, medIds: medIds);
-    if (rows.isEmpty) return const {};
+    if (rows.isEmpty) return const <String, int>{};
 
     // 3) Local bucketing: raw text -> count (to reduce payload to backend)
     // For the pie we only care about reactionDescription (it is non-empty in 19k+ rows)
@@ -818,7 +949,7 @@ class AnalyticsRepository {
       rawCounts.update(key, (v) => v + 1, ifAbsent: () => 1);
     }
 
-    if (rawCounts.isEmpty) return const {};
+    if (rawCounts.isEmpty) return const <String, int>{};
 
     // 4) Call backend NER + ADR normalizer to merge spellings & extract entities
     final uri = Uri.parse(
@@ -869,7 +1000,11 @@ class AnalyticsRepository {
     rawCounts.forEach((key, cnt) {
       fallback[displayFor[key] ?? key] = cnt;
     });
-    return fallback;
+      return fallback;
+    })();
+
+    _adverseReactionsCache[cacheKey] = future;
+    return future;
   }
 
   /// Patient Experience word cloud
@@ -879,6 +1014,11 @@ class AnalyticsRepository {
   /// - When f.medicine is null / "all" → all medicines
   /// - When f.medicine has a value     → only that medicine
   Future<List<WordItem>> wordCloud(DashboardFilter f, {int limit = 300}) async {
+    final cacheKey = '${_filterCacheKey(f)}|$limit';
+    final cached = _wordCloudCache[cacheKey];
+    if (cached != null) return cached;
+
+    final Future<List<WordItem>> future = (() async {
     // 1) Get normalized counts from the ADR normalizer pipeline
     final counts = await adverseReactionsCounts(f);
 
@@ -913,7 +1053,11 @@ class AnalyticsRepository {
       if (out.length >= limit) break; // only top N words in the cloud
     }
 
-    return out;
+      return out;
+    })();
+
+    _wordCloudCache[cacheKey] = future;
+    return future;
   }
 
   Future<List<GeoRow>> geoTable(DashboardFilter f) async {
@@ -968,69 +1112,105 @@ class AnalyticsRepository {
   }
 
   // Safely compute Top Medicine without RPCs or .in_()
-  Future<(String?, int?)> topMedicine(DateTime start, DateTime end) async {
-    // Pull only what we need from ADR_Reports
-    final rowsDynamic = await sb
-        .from('ADR_Reports')
-        .select('medicineId, created_at')
-        .gte('created_at', _iso(start))
-        .lt('created_at', _iso(end));
+  Future<(String?, int?)> topMedicine(DashboardFilter f) async {
+    final cacheKey = _filterCacheKey(f);
+    final cached = _topMedicineCache[cacheKey];
+    if (cached != null) return cached;
 
-    final rows =
-        (rowsDynamic is List)
-            ? rowsDynamic.cast<Map<String, dynamic>>()
-            : <Map<String, dynamic>>[];
+    final Future<(String?, int?)> future = (() async {
+      var q = sb
+          .from('ADR_Reports')
+          .select('medicineId, created_at')
+          .gte('created_at', _iso(f.start))
+          .lt('created_at', _iso(f.end));
 
-    if (rows.isEmpty) return (null, null);
+      final rowsDynamic = await q;
+      final rows =
+          (rowsDynamic is List)
+              ? rowsDynamic.cast<Map<String, dynamic>>()
+              : const <Map<String, dynamic>>[];
 
-    // Count by medicineId (client-side)
-    final countsById = <dynamic, int>{};
-    for (final r in rows) {
-      final id = r['medicineId'];
-      if (id == null) continue;
-      countsById.update(id, (v) => v + 1, ifAbsent: () => 1);
-    }
-    if (countsById.isEmpty) return (null, null);
+      if (rows.isEmpty) return (null, null);
 
-    // Pick top medicineId
-    dynamic topId;
-    int topCount = 0;
-    countsById.forEach((id, cnt) {
-      if (cnt > topCount) {
-        topId = id;
-        topCount = cnt;
+      final meds =
+          await sb.from('Medicines').select('id, brandName, genericName');
+      final medsById = <String, Map<String, dynamic>>{};
+      if (meds is List) {
+        for (final raw in meds) {
+          final med = raw as Map<String, dynamic>;
+          final id = med['id'];
+          if (id != null) {
+            medsById[id.toString()] = med;
+          }
+        }
       }
-    });
 
-    // Resolve display name from Medicines
-    String? name;
-    if (topId != null) {
-      final medRes = await sb
-          .from('Medicines')
-          .select('brandName, genericName')
-          .eq('id', topId)
-          .limit(1);
+      final selectedCanon = _selectedMedicineCanon(f.medicine);
+      final countsByMedicine = <String, int>{};
+      final displayByCanon = <String, String>{};
 
-      final med =
-          (medRes is List && medRes.isNotEmpty)
-              ? (medRes.first as Map<String, dynamic>)
-              : null;
-      final brand = (med?['brandName'] as String?)?.trim();
-      final generic = (med?['genericName'] as String?)?.trim();
-      name =
-          (brand?.isNotEmpty ?? false)
-              ? brand
-              : (generic?.isNotEmpty ?? false)
-              ? generic
-              : 'Unknown';
-    }
+      for (final row in rows) {
+        final med =
+            medsById[(row['medicineId'] ?? '').toString()] ??
+            const <String, dynamic>{};
+        final generic = (med['genericName'] as String?)?.trim();
+        final brandFromMedicines = (med['brandName'] as String?)?.trim();
+        final preferredBrand = brandFromMedicines;
 
-    return (name, topCount);
+        final label = _pickMedicineLabel(
+          generic: generic,
+          drugName: generic,
+          brand: preferredBrand,
+        );
+        if (label == null) continue;
+
+        final canon = _canonDrugName(label);
+        if (selectedCanon.isNotEmpty && canon != selectedCanon) {
+          final genericCanon = _canonDrugName(generic);
+          final brandCanon = _canonDrugName(preferredBrand);
+          if (genericCanon != selectedCanon && brandCanon != selectedCanon) {
+            continue;
+          }
+        }
+
+        countsByMedicine.update(canon, (value) => value + 1, ifAbsent: () => 1);
+        displayByCanon.putIfAbsent(canon, () => label);
+      }
+
+      if (countsByMedicine.isEmpty) {
+        return _topMedicineFromBackend(f.medicine);
+      }
+
+      String? topCanon;
+      var topCount = 0;
+      countsByMedicine.forEach((canon, count) {
+        if (count > topCount) {
+          topCanon = canon;
+          topCount = count;
+        }
+      });
+
+      final name =
+          topCanon == null ? null : displayByCanon[topCanon!] ?? f.medicine;
+      if (_isUsableMedicineName(name) && topCount > 0) {
+        return (name, topCount);
+      }
+
+      return _topMedicineFromBackend(f.medicine);
+    })();
+
+    _topMedicineCache[cacheKey] = future;
+    return future;
   }
 
   /* ───────── Clinical Management: counts by type ───────── */
 
   Future<Map<String, int>> clinicalManagementCounts(DashboardFilter f) async {
+    final cacheKey = _filterCacheKey(f);
+    final cached = _clinicalManagementCache[cacheKey];
+    if (cached != null) return cached;
+
+    final Future<Map<String, int>> future = (() async {
     var q = sb
         .from(_tblReports)
         .select('$_colCreatedAt, actionTakenWithMedicine, reactionOutcome')
@@ -1041,7 +1221,7 @@ class AnalyticsRepository {
     if (rows.isEmpty) {
       // ignore: avoid_print
       print('CM: 0 rows for ${f.start}..${f.end}');
-      return const {};
+      return const <String, int>{};
     }
 
     String bucketFor(String? s) {
@@ -1084,7 +1264,11 @@ class AnalyticsRepository {
     print(
       'CM: derived from actionTakenWithMedicine/reactionOutcome -> $counts rows=${rows.length}',
     );
-    return counts;
+      return counts;
+    })();
+
+    _clinicalManagementCache[cacheKey] = future;
+    return future;
   }
 
   /* ───────── Admin Areas / Bounds ───────── */

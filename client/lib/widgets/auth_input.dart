@@ -8,6 +8,9 @@ class AuthInput extends StatelessWidget {
   final bool obscureText;
   final String? Function(String?)? validator;
   final Widget? suffixIcon;
+  final FocusNode? focusNode;
+  final TextInputAction? textInputAction;
+  final ValueChanged<String>? onFieldSubmitted;
 
   const AuthInput({
     super.key,
@@ -17,15 +20,21 @@ class AuthInput extends StatelessWidget {
     this.obscureText = false,
     this.validator,
     this.suffixIcon,
+    this.focusNode,
+    this.textInputAction,
+    this.onFieldSubmitted,
   });
 
   @override
   Widget build(BuildContext context) {
     return TextFormField(
       controller: controller,
+      focusNode: focusNode,
       obscureText: obscureText,
       validator: validator,
       autovalidateMode: AutovalidateMode.onUserInteraction,
+      textInputAction: textInputAction,
+      onFieldSubmitted: onFieldSubmitted,
       decoration: InputDecoration(
         prefixIcon: Icon(icon),
         suffixIcon: suffixIcon,

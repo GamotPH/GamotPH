@@ -64,10 +64,22 @@ class DashboardScreen extends StatelessWidget {
             itemBuilder: (context, index) {
               final report = reports[index];
               final createdAt = DateTime.tryParse(report['created_at'] ?? '');
+              final medicineName =
+                  (report['generic_name'] as String?)?.trim().isNotEmpty == true
+                      ? (report['generic_name'] as String).trim()
+                      : (report['drugName'] as String?)?.trim().isNotEmpty == true
+                      ? (report['drugName'] as String).trim()
+                      : (report['medicine_name'] as String?)?.trim().isNotEmpty ==
+                            true
+                      ? (report['medicine_name'] as String).trim()
+                      : (report['brandName'] as String?)?.trim().isNotEmpty ==
+                            true
+                      ? (report['brandName'] as String).trim()
+                      : 'Unnamed Drug';
 
               return ListTile(
                 leading: const Icon(Icons.medical_services_outlined),
-                title: Text(report['drugName'] ?? 'Unnamed Drug'),
+                title: Text(medicineName),
                 subtitle: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [

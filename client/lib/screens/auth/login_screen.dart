@@ -21,6 +21,8 @@ class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final email = TextEditingController();
   final password = TextEditingController();
+  final _emailFocusNode = FocusNode();
+  final _passwordFocusNode = FocusNode();
   bool _isLoading = false;
   String? _errorMessage;
   bool _hidePassword = true;
@@ -91,6 +93,15 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   @override
+  void dispose() {
+    email.dispose();
+    password.dispose();
+    _emailFocusNode.dispose();
+    _passwordFocusNode.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.white,
@@ -112,17 +123,28 @@ class _LoginScreenState extends State<LoginScreen> {
                       const SizedBox(height: 48),
                       AuthInput(
                         controller: email,
+                        focusNode: _emailFocusNode,
                         labelText: "Email",
                         icon: Icons.email,
                         validator: _validateEmail,
+                        textInputAction: TextInputAction.next,
+                        onFieldSubmitted:
+                            (_) => _passwordFocusNode.requestFocus(),
                       ),
                       const SizedBox(height: 16),
                       AuthInput(
                         controller: password,
+                        focusNode: _passwordFocusNode,
                         labelText: "Password",
                         icon: Icons.lock,
                         obscureText: _hidePassword,
                         validator: _validatePassword,
+                        textInputAction: TextInputAction.done,
+                        onFieldSubmitted: (_) {
+                          if (!_isLoading) {
+                            login();
+                          }
+                        },
                         suffixIcon: IconButton(
                           icon: Icon(
                             _hidePassword

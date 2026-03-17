@@ -23,6 +23,10 @@ final repoProvider = Provider<AnalyticsRepository>(
   (ref) => AnalyticsRepository(supa.Supabase.instance.client),
 );
 
+final earliestReportDateProvider = FutureProvider<DateTime?>((ref) {
+  return ref.watch(repoProvider).earliestReportDate();
+});
+
 /* ------------------------------ FAMILY providers -------------------------- */
 final canonicalGenericMedicinesProvider = FutureProvider<List<String>>((
   ref,
@@ -42,6 +46,31 @@ final canonicalGenericMedicinesProvider = FutureProvider<List<String>>((
   }
 
   return decoded.cast<String>();
+});
+
+final reportMedicineNamesProvider = FutureProvider<List<String>>((ref) async {
+  final uri = BackendConfig.uri('/api/v1/analytics/medicine-names');
+  final resp = await http.get(uri);
+
+  if (resp.statusCode != 200) {
+    throw Exception('Failed to load report medicines');
+  }
+
+  final decoded = jsonDecode(resp.body);
+  final names = <String>{};
+  if (decoded is List) {
+    for (final item in decoded) {
+      if (item is String && item.trim().isNotEmpty) {
+        names.add(item.trim());
+      }
+    }
+  }
+
+  final list =
+      names.toList()
+        ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+
+  return ['All', ...list];
 });
 
 /* ------------------------------ Global filters ---------------------------- */
@@ -166,35 +195,31 @@ class ReportLogItem {
 /* ------------------------------ Data providers ---------------------------- */
 
 // Key Metrics – return the KeyMetrics model from the repository
-final keyMetricsProvider = FutureProvider.autoDispose<KeyMetrics>((ref) async {
+final keyMetricsProvider = FutureProvider<KeyMetrics>((ref) async {
   final repo = ref.watch(repoProvider); // <-- use repoProvider
   final filter = ref.watch(filterProvider); // <-- current dashboard filter
   return repo.keyMetrics(filter); // <-- returns KeyMetrics
 });
 
-final symptomsProvider = FutureProvider.autoDispose<Map<String, dynamic>>((
-  ref,
-) async {
+final symptomsProvider = FutureProvider<Map<String, dynamic>>((ref) async {
   final f = ref.watch(filterProvider);
   final repo = ref.watch(repoProvider);
 
-  final monthly = await repo.symptomsMonthly(f);
-  final yearly = await repo.symptomsYearly(f);
+  final results = await Future.wait([
+    repo.symptomsMonthly(f),
+    repo.symptomsYearly(f),
+  ]);
 
-  return {'yearly': yearly, 'monthly': monthly};
+  return {'monthly': results[0], 'yearly': results[1]};
 });
 
-final wordCloudProvider = FutureProvider.autoDispose<List<WordItem>>((
-  ref,
-) async {
+final wordCloudProvider = FutureProvider<List<WordItem>>((ref) async {
   final f = ref.watch(filterProvider);
   return ref.watch(repoProvider).wordCloud(f);
 });
 
 /// Geo Table (REAL DATA)
-final geoDistributionProvider = FutureProvider.autoDispose<List<GeoRow>>((
-  ref,
-) async {
+final geoDistributionProvider = FutureProvider<List<GeoRow>>((ref) async {
   final client = supa.Supabase.instance.client;
   final f = ref.watch(filterProvider);
 
@@ -438,88 +463,12 @@ final topAdrsProvider = FutureProvider<List<TopAdr>>((ref) {
 });
 
 /// 🔹 Top medicine by GENERIC NAME within the current filter's time range.
-final topMedicineProvider = FutureProvider.autoDispose<(String?, int?)>((
-  ref,
-) async {
+final topMedicineProvider = FutureProvider<(String?, int?)>((ref) async {
   final f = ref.watch(filterProvider);
-  final client = supa.Supabase.instance.client;
-
-  // 1. Get all ADR reports in range, with medicineId.
-  final adrs = await client
-      .from('ADR_Reports')
-      .select('medicineId')
-      .gte('created_at', f.start.toIso8601String())
-      .lt('created_at', f.end.toIso8601String());
-  // 🔴 DO NOT filter on is_live here, your data uses 0 and you'd get 0 rows.
-
-  if (adrs.isEmpty) {
-    return (null, 0);
-  }
-
-  // Count ADR rows per medicineId (stringified to be safe).
-  final Map<String, int> countsByMedId = {};
-  for (final row in adrs as List<dynamic>) {
-    final medIdRaw = row['medicineId'];
-    if (medIdRaw == null) continue;
-    final medId = medIdRaw.toString();
-    if (medId.isEmpty) continue;
-
-    countsByMedId[medId] = (countsByMedId[medId] ?? 0) + 1;
-  }
-
-  if (countsByMedId.isEmpty) {
-    return (null, 0);
-  }
-
-  // 2. Fetch ALL medicines (table is small) and map id -> genericName.
-  final meds = await client.from('Medicines').select('id, genericName');
-
-  if (meds.isEmpty) {
-    return (null, 0);
-  }
-
-  // 3. Aggregate counts by genericName (case-insensitive).
-  final Map<String, int> countsByGeneric = {};
-  final Map<String, String> displayNames = {}; // pretty casing
-
-  for (final m in meds as List<dynamic>) {
-    final idRaw = m['id'];
-    if (idRaw == null) continue;
-    final id = idRaw.toString();
-
-    final genericRaw = (m['genericName'] as String?)?.trim();
-    if (genericRaw == null || genericRaw.isEmpty) continue;
-
-    final key = genericRaw.toLowerCase(); // canonical generic name
-    final medCount = countsByMedId[id] ?? 0;
-    if (medCount == 0) continue; // medicine has no ADRs in this time range
-
-    countsByGeneric[key] = (countsByGeneric[key] ?? 0) + medCount;
-    displayNames[key] = displayNames[key] ?? genericRaw;
-  }
-
-  if (countsByGeneric.isEmpty) {
-    return (null, 0);
-  }
-
-  // 4. Pick generic with highest total ADR count.
-  String bestKey = countsByGeneric.keys.first;
-  int bestCount = countsByGeneric[bestKey]!;
-
-  countsByGeneric.forEach((k, v) {
-    if (v > bestCount) {
-      bestKey = k;
-      bestCount = v;
-    }
-  });
-
-  final bestName = displayNames[bestKey];
-  return (bestName, bestCount);
+  return ref.watch(repoProvider).topMedicine(f);
 });
 
-final clinicalManagementProvider = FutureProvider.autoDispose<ClinicalSeries>((
-  ref,
-) async {
+final clinicalManagementProvider = FutureProvider<ClinicalSeries>((ref) async {
   final f = ref.watch(filterProvider);
   final counts = await ref.watch(repoProvider).clinicalManagementCounts(f);
 
@@ -552,9 +501,7 @@ final clinicalManagementProvider = FutureProvider.autoDispose<ClinicalSeries>((
 });
 
 /// 🔹 NEW: ADR pie data from backend-normalized reactions
-final adverseReactionsProvider = FutureProvider.autoDispose<PieSeries>((
-  ref,
-) async {
+final adverseReactionsProvider = FutureProvider<PieSeries>((ref) async {
   final f = ref.watch(filterProvider);
   final repo = ref.watch(repoProvider);
 
@@ -861,6 +808,7 @@ final metricsRealtimeProvider = Provider<void>((ref) {
   void deferInvalidateAll() {
     Future.microtask(() {
       if (isDisposed) return;
+      ref.read(repoProvider).clearAnalyticsCache();
       ref.invalidate(keyMetricsProvider);
       ref.invalidate(symptomsProvider);
       ref.invalidate(wordCloudProvider);

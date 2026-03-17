@@ -220,7 +220,11 @@ class HomeLayoutState extends State<HomeLayout> {
               padding: const EdgeInsets.symmetric(horizontal: 8),
               children: [
                 _navTileWithIcon(Icons.show_chart, "Reports", NavItem.home),
-                _navTileWithIcon(Icons.history, "History", NavItem.history),
+                _navTileWithIcon(
+                  Icons.location_on_outlined,
+                  "Maps",
+                  NavItem.trends,
+                ),
                 // ✅ Renamed to Report Logs
                 _navTileWithIcon(
                   Icons.notifications,

@@ -201,17 +201,26 @@ class _ADRDonutState extends State<_ADRDonut> {
               const SizedBox(width: 32), // ↑ a bit more space to the legend
               Expanded(
                 flex: 10,
-                child: Align(alignment: Alignment.centerLeft, child: legend),
+                child: SingleChildScrollView(
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: legend,
+                  ),
+                ),
               ),
             ],
           );
         } else {
           return Column(
-            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              donut,
+              Center(child: donut),
               const SizedBox(height: 12),
-              Align(alignment: Alignment.centerLeft, child: legend),
+              Expanded(
+                child: SingleChildScrollView(
+                  child: Align(alignment: Alignment.centerLeft, child: legend),
+                ),
+              ),
             ],
           );
         }
